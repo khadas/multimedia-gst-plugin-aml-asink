@@ -1,0 +1,5 @@
+config BR2_PACKAGE_GST_PLUGINS_AML_ASINK
+    bool "gst-plugin-aml-asink"
+    depends on BR2_PACKAGE_HAL_AUDIO_SERVICE && BR2_PACKAGE_GSTREAMER1
+    help
+        gstreamer plugin for audio HAL
