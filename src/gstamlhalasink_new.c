@@ -352,7 +352,7 @@ gst_aml_hal_asink_dispose (GObject * object)
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
   if (sink->provided_clock) {
-    gst_audio_clock_invalidate (sink->provided_clock);
+    gst_audio_clock_invalidate (GST_AUDIO_CLOCK(sink->provided_clock));
     gst_object_unref (sink->provided_clock);
     sink->provided_clock = NULL;
   }
