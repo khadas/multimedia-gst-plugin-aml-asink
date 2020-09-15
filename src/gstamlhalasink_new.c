@@ -352,7 +352,7 @@ gst_aml_hal_asink_dispose (GObject * object)
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
   if (sink->provided_clock) {
-    gst_audio_clock_invalidate (GST_AUDIO_CLOCK(sink->provided_clock));
+    gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
     gst_object_unref (sink->provided_clock);
     sink->provided_clock = NULL;
   }
@@ -392,16 +392,21 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   uint32_t pcr = 0;
   gint64 timepassed_90k, timepassed;
 
-  if (!priv->tsync_enable_ || !priv->render_samples) {
+  if (!priv->render_samples) {
     *cur = 0;
     return TRUE;
   }
 
   if (!priv->direct_mode_) {
-    GST_WARNING_OBJECT(sink, "not well implemented");
+    //TODO(song): get HAL position
     *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
     GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
     return FALSE;
+  }
+
+  if (!priv->tsync_enable_) {
+    *cur = 0;
+    return TRUE;
   }
 
   get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
@@ -560,17 +565,26 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
   GstAmlHalAsinkPrivate *priv = sink->priv;
   uint32_t pcr = 0;
 
+  if (!priv->render_samples) {
+    result = priv->segment.start;
+    goto done;
+  }
+
+  if (!priv->direct_mode_) {
+    //TODO(song): get HAL render position
+    result = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
+    goto done;
+  }
+
   if (!priv->tsync_enable_) {
     GST_TRACE_OBJECT(sink, "tsync disabled");
     return result;
   }
-  if (!priv->render_samples) {
-    result = priv->segment.start;
-  } else {
-    get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
-    result = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
-  }
 
+  get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
+  result = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
+
+done:
   GST_LOG_OBJECT (sink, "time %" GST_TIME_FORMAT " 0x%x", GST_TIME_ARGS (result), pcr);
   return result;
 }
@@ -1758,7 +1772,10 @@ static int tsync_enable (GstAmlHalAsink * sink, gboolean enable)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
-  if (enable && priv->direct_mode_ && !priv->tsync_enable_) {
+  if (!priv->direct_mode_)
+    return 0;
+
+  if (enable && !priv->tsync_enable_) {
     config_sys_node(TSYNC_ENABLE, "1");
     priv->tsync_enable_ = TRUE;
     GST_DEBUG_OBJECT (sink, "tsync enable");
@@ -1769,7 +1786,7 @@ static int tsync_enable (GstAmlHalAsink * sink, gboolean enable)
     return 0;
   }
 
-  if (!enable && priv->direct_mode_ && priv->tsync_enable_) {
+  if (!enable && priv->tsync_enable_) {
     config_sys_node(TSYNC_ENABLE, "0");
     priv->tsync_enable_ = FALSE;
     GST_DEBUG_OBJECT (sink, "tsync disable");
@@ -1787,7 +1804,8 @@ static gboolean hal_start (GstAmlHalAsink * sink)
     GST_INFO_OBJECT (sink, "stream not created yet");
     priv->paused_ = FALSE;
   } else {
-    tsync_send_audio_event(AUDIO_RESUME_EVENT);
+    if (priv->direct_mode_)
+      tsync_send_audio_event(AUDIO_RESUME_EVENT);
     g_mutex_lock(&priv->feed_lock);
     if (priv->paused_) {
       int ret;
@@ -1818,7 +1836,8 @@ static gboolean hal_pause (GstAmlHalAsink * sink)
     return FALSE;
   }
 
-  tsync_send_audio_event(AUDIO_PAUSE_EVENT);
+  if (priv->direct_mode_)
+    tsync_send_audio_event(AUDIO_PAUSE_EVENT);
   g_mutex_lock(&priv->feed_lock);
   if (priv->paused_) {
     g_mutex_unlock(&priv->feed_lock);
@@ -1859,7 +1878,6 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
   priv->flushing_ = TRUE;
   g_cond_signal (&priv->run_ready);
   g_mutex_unlock (&priv->feed_lock);
-
   tsync_enable (sink, FALSE);
   GST_DEBUG_OBJECT (sink, "stop");
   return TRUE;
