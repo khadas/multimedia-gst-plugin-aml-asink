@@ -1026,7 +1026,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       GST_OBJECT_UNLOCK (sink);
 
       /* ok, now we can post the message */
-      GST_DEBUG_OBJECT (sink, "Now posting EOS");
+      GST_WARNING_OBJECT (sink, "Now posting EOS");
       priv->seqnum = gst_event_get_seqnum (event);
       GST_DEBUG_OBJECT (sink, "Got seqnum #%" G_GUINT32_FORMAT, priv->seqnum);
 
