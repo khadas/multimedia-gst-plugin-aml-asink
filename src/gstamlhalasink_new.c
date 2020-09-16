@@ -241,6 +241,7 @@ static int get_sysfs_uint32(const char *path, uint32_t *value);
 static int tsync_enable (GstAmlHalAsink * sink, gboolean enable);
 static void dump(const char* path, const uint8_t *data, int size);
 static int tsync_send_audio_event(const char* event);
+static int tsync_reset_pcr (GstAmlHalAsink * sink);
 
 static void
 gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
@@ -1406,6 +1407,8 @@ gst_aml_hal_asink_change_state (GstElement * element,
     case GST_STATE_CHANGE_READY_TO_PAUSED:
       GST_DEBUG_OBJECT(sink, "ready to paused");
       gst_base_sink_set_async_enabled (GST_BASE_SINK_CAST(sink), FALSE);
+      if (priv->direct_mode_)
+        tsync_reset_pcr (sink);
       gst_aml_hal_asink_reset_sync (sink);
       /* start in paused state until PLAYING */
       priv->paused_ = TRUE;
@@ -1766,6 +1769,12 @@ static int tsync_send_audio_event(const char* event)
   char *val;
   val = "AUDIO_PAUSE";
   return config_sys_node(TSYNC_EVENT, val);
+}
+
+static int tsync_reset_pcr (GstAmlHalAsink * sink)
+{
+    config_sys_node(TSYNC_PCRSCR, "0");
+    return 0;
 }
 
 static int tsync_enable (GstAmlHalAsink * sink, gboolean enable)
