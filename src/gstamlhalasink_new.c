@@ -423,7 +423,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     timepassed_90k = (int)(pcr - priv->first_pts) + (priv->wrapping_time-1)*0xFFFFFFFFLL;
 
   timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
-  *cur += priv->segment.start + timepassed;
+  *cur += priv->segment.position + timepassed;
 
   GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
   if (GST_FORMAT_TIME != format) {
