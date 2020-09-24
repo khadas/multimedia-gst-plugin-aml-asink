@@ -1074,19 +1074,37 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     }
     case GST_EVENT_SEGMENT:
     {
-      gst_event_copy_segment (event, &priv->segment);
-      GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
-          &priv->segment);
+      GstSegment segment;
+      gst_event_copy_segment (event, &segment);
+
+      if (segment.start != GST_CLOCK_TIME_NONE) {
+        GstMessage *seg_rec;
+
+        gst_event_copy_segment (event, &priv->segment);
+        GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
+            &priv->segment);
+        seg_rec = gst_message_new_custom(GST_MESSAGE_INFO,
+            GST_OBJECT_CAST (sink), gst_structure_new_empty("segment-received"));
+        if (seg_rec)
+          gst_element_post_message (GST_ELEMENT_CAST (sink), seg_rec);
+      } else {
+        GST_WARNING_OBJECT (sink, "rate update %f -> %f", priv->segment.rate, segment.rate);
+        if (priv->segment.rate == segment.rate) {
+          GST_WARNING_OBJECT (sink, "keep current rate");
+          break;
+        }
+        priv->segment.rate = segment.rate;
+      }
 
       /* prepare for trick play */
-      if (priv->segment.rate != 1 && priv->segment.rate != 0
+      if (segment.rate != 1 && segment.rate != 0
               && priv->format_ == AUDIO_FORMAT_PCM_16_BIT) {
           int err;
 
           if (priv->src)
               speex_resampler_destroy(priv->src);
 
-          priv->src_target_rate = (guint32)(48000/priv->segment.rate);
+          priv->src_target_rate = (guint32)(48000/segment.rate);
           priv->src = speex_resampler_init(2, 48000,
                   priv->src_target_rate,
                   SPEEX_RESAMPLER_QUALITY_DEFAULT, &err);
@@ -1096,12 +1114,12 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
               goto done;
           }
           GST_INFO_OBJECT (sink, "SRC created, rate:%f target_rate:%d",
-              priv->segment.rate, priv->src_target_rate);
+              segment.rate, priv->src_target_rate);
           if (priv->direct_mode_) {
-              update_pcr_speed(priv->segment.rate);
+              update_pcr_speed(segment.rate);
               GST_INFO_OBJECT (sink, "pcr rate updated");
           }
-      } else if (priv->segment.rate == 1) {
+      } else if (segment.rate == 1) {
           if (priv->src) {
               speex_resampler_destroy(priv->src);
               priv->src = NULL;
