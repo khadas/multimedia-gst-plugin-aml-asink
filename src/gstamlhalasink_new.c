@@ -1442,9 +1442,16 @@ gst_aml_hal_asink_change_state (GstElement * element,
     }
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
     {
+      GstBaseSink* bsink = GST_BASE_SINK_CAST (sink);
       GST_DEBUG_OBJECT(sink, "playing to paused");
       GST_OBJECT_LOCK (sink);
       hal_pause (sink);
+      /* To complete transition to paused state in async_enabled mode,
+       * we need a preroll buffer pushed to the pad.
+       * This is a workaround to avoid the need for preroll buffer. */
+      GST_BASE_SINK_PREROLL_LOCK (bsink);
+      bsink->have_preroll = 1;
+      GST_BASE_SINK_PREROLL_UNLOCK (bsink);
       GST_OBJECT_UNLOCK (sink);
 
       break;
