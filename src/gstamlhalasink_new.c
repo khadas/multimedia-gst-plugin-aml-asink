@@ -60,7 +60,6 @@ GST_DEBUG_CATEGORY_STATIC (gst_aml_hal_asink_debug_category);
 #define TSYNC_EVENT  "/sys/class/tsync/event"
 #define TSYNC_MODE   "/sys/class/tsync/mode"
 #define TSYNC_PCRSCR "/sys/class/tsync/pts_pcrscr"
-#define FIRST_VPTS "/sys/class/tsync/checkin_firstvpts"
 #define AUDIO_PAUSE_EVENT "AUDIO_PAUSE"
 #define AUDIO_RESUME_EVENT "AUDIO_RESUME"
 #define PTS_90K 90000
@@ -133,8 +132,6 @@ struct _GstAmlHalAsinkPrivate
   uint8_t *buf_src;
   guint32 buf_src_len;
   guint32 src_target_rate;
-  /* av sync option */
-  gboolean align_video;
 };
 
 enum
@@ -145,7 +142,6 @@ enum
   PROP_VOLUME,
   PROP_MUTE,
   PROP_PCR_MASTER,
-  PROP_ALIGN_VIDEO,
   PROP_LAST
 };
 
@@ -301,11 +297,6 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       g_param_spec_boolean ("pcr-master", "Enable PRC master avsync mode",
           "Enable this mode for DVB/ATSC playback", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-  g_object_class_install_property (gobject_class, PROP_ALIGN_VIDEO,
-      g_param_spec_boolean ("align-video", "align video from beginning",
-          "Will align first audio with first video sample in direct mode",
-          FALSE, G_PARAM_WRITABLE));
 
   gstelement_class->change_state =
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_change_state);
@@ -680,10 +671,6 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->pcr_master_ = g_value_get_boolean(value);
       GST_DEBUG_OBJECT (sink, "pcr master mode:%d", priv->pcr_master_);
       break;
-    case PROP_ALIGN_VIDEO:
-      priv->align_video = g_value_get_boolean(value);
-      GST_DEBUG_OBJECT (sink, "align video: %d", priv->align_video);
-      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -871,7 +858,6 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   priv->first_pts_set = FALSE;
   priv->wrapping_time = 0;
   priv->last_pcr = 0;
-  config_sys_node(FIRST_VPTS, "-1");
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
@@ -2145,33 +2131,6 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
       //dump("/tmp/err.dat", data, towrite);
       return 0;
     }
-  }
-
-  if (priv->direct_mode_ && priv->align_video && !priv->render_samples) {
-    /* wait for first videc sample with timeout */
-    uint32_t vpts;
-    int timeout;
-    int timeout_cnt;
-
-    timeout_cnt = 1000;
-    timeout = timeout_cnt;
-    GST_INFO_OBJECT (sink, "before waiting video");
-    do {
-      get_sysfs_uint32(FIRST_VPTS, &vpts);
-      if (vpts == 0x12345678)
-        break;
-      if (priv->flushing_) {
-        GST_INFO_OBJECT (sink, "quit waiting video in flush");
-        return size;
-      }
-      usleep(10000);
-      timeout--;
-    } while (timeout);
-
-    if (!timeout)
-      GST_WARNING_OBJECT (sink, "waiting video timeout %dms", timeout_cnt * 10);
-    else
-      GST_INFO_OBJECT (sink, "waiting video for %dms", (timeout_cnt - timeout) * 10);
   }
 
   /* notify EOS */
