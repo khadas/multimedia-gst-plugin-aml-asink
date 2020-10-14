@@ -352,13 +352,6 @@ gst_aml_hal_asink_dispose (GObject * object)
   GstAmlHalAsink * sink = GST_AML_HAL_ASINK(object);
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
-  if (sink->provided_clock) {
-    gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
-    gst_object_unref (sink->provided_clock);
-    sink->provided_clock = NULL;
-  }
-
-  gst_aml_hal_asink_close (sink);
   g_mutex_clear (&priv->feed_lock);
   g_cond_clear (&priv->run_ready);
   G_OBJECT_CLASS (parent_class)->dispose (object);
@@ -1520,6 +1513,14 @@ gst_aml_hal_asink_change_state (GstElement * element,
       GST_OBJECT_LOCK (sink);
       hal_close_device (sink);
       GST_OBJECT_UNLOCK (sink);
+
+      if (sink->provided_clock) {
+        gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
+        gst_object_unref (sink->provided_clock);
+        sink->provided_clock = NULL;
+      }
+      gst_aml_hal_asink_close (sink);
+
       break;
     default:
       break;
