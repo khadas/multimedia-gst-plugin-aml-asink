@@ -1076,10 +1076,8 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         gst_event_copy_segment (event, &priv->segment);
         GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
             &priv->segment);
-        seg_rec = gst_message_new_custom(GST_MESSAGE_INFO,
-            GST_OBJECT_CAST (sink), gst_structure_new_empty("segment-received"));
         seg_rec = gst_message_new_info_with_details (GST_OBJECT_CAST (sink),
-            NULL, NULL, gst_structure_new_empty("segment-received"));
+            NULL, "segment-received", gst_structure_new_empty("segment-received"));
         if (seg_rec)
           gst_element_post_message (GST_ELEMENT_CAST (sink), seg_rec);
       } else {
