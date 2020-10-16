@@ -851,6 +851,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   priv->first_pts_set = FALSE;
   priv->wrapping_time = 0;
   priv->last_pcr = 0;
+  gst_caps_replace (&priv->spec.caps, NULL);
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
