@@ -335,11 +335,8 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   GST_OBJECT_FLAG_SET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
 
 
-  if (!gst_aml_hal_asink_open (sink))
-    GST_ERROR_OBJECT(sink, "asink open failure");
 
   priv->direct_mode_ = TRUE;
-  priv->quit_clock_wait = FALSE;
   priv->received_eos = FALSE;
   priv->group_id = -1;
   g_mutex_init (&priv->feed_lock);
@@ -351,6 +348,12 @@ gst_aml_hal_asink_dispose (GObject * object)
 {
   GstAmlHalAsink * sink = GST_AML_HAL_ASINK(object);
   GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  if (sink->provided_clock) {
+    gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
+    gst_object_unref (sink->provided_clock);
+    sink->provided_clock = NULL;
+  }
 
   g_mutex_clear (&priv->feed_lock);
   g_cond_clear (&priv->run_ready);
@@ -844,6 +847,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
   priv->eos_time = -1;
+  priv->received_eos = FALSE;
   priv->eos = FALSE;
   priv->last_ts = GST_CLOCK_TIME_NONE;
   priv->render_samples = 0;
@@ -1163,7 +1167,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     }
     default:
     {
-      GST_DEBUG_OBJECT (sink, "pass to basesink");
+      GST_LOG_OBJECT (sink, "pass to basesink");
       return GST_BASE_SINK_CLASS (parent_class)->event (bsink, event);
     }
   }
@@ -1179,7 +1183,8 @@ gst_aml_hal_asink_pad_event (GstPad * pad, GstObject * parent, GstEvent * event)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   gboolean result = TRUE;
 
-  GST_DEBUG_OBJECT (sink, "received event %p %" GST_PTR_FORMAT, event, event);
+  if (GST_EVENT_TYPE (event) != GST_EVENT_TAG)
+    GST_DEBUG_OBJECT (sink, "received event %p %" GST_PTR_FORMAT, event, event);
 
   if (GST_EVENT_IS_SERIALIZED (event)) {
     if (G_UNLIKELY (priv->flushing_) &&
@@ -1192,7 +1197,8 @@ gst_aml_hal_asink_pad_event (GstPad * pad, GstObject * parent, GstEvent * event)
 
   result = gst_aml_hal_asink_event (sink, event);
 done:
-  GST_DEBUG_OBJECT (sink, "done");
+  if (GST_EVENT_TYPE (event) != GST_EVENT_TAG)
+    GST_DEBUG_OBJECT (sink, "done");
   return result;
 
   /* ERRORS */
@@ -1408,6 +1414,11 @@ gst_aml_hal_asink_change_state (GstElement * element,
       GST_DEBUG_OBJECT(sink, "null to ready");
       gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
 
+      if (!gst_aml_hal_asink_open (sink)) {
+        GST_ERROR_OBJECT(sink, "asink open failure");
+        goto open_failed;
+      }
+
       GST_OBJECT_LOCK (sink);
       if (!hal_open_device (sink)) {
         GST_OBJECT_UNLOCK (sink);
@@ -1424,6 +1435,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       gst_aml_hal_asink_reset_sync (sink);
       /* start in paused state until PLAYING */
       priv->paused_ = TRUE;
+      priv->quit_clock_wait = FALSE;
 
       /* Only post clock-provide messages if this is the clock that
        * we've created. If the subclass has overriden it the subclass
@@ -1496,6 +1508,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
           priv->buf_src = NULL;
           priv->buf_src_len = 0;
       }
+      gst_aml_hal_asink_reset_sync (sink);
       GST_OBJECT_UNLOCK (sink);
       break;
     default:
@@ -1515,11 +1528,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
       hal_close_device (sink);
       GST_OBJECT_UNLOCK (sink);
 
-      if (sink->provided_clock) {
-        gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
-        gst_object_unref (sink->provided_clock);
-        sink->provided_clock = NULL;
-      }
       gst_aml_hal_asink_close (sink);
 
       break;
