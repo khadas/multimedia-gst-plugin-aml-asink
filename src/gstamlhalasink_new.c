@@ -132,6 +132,7 @@ struct _GstAmlHalAsinkPrivate
   uint8_t *buf_src;
   guint32 buf_src_len;
   guint32 src_target_rate;
+  guint32 resample_quality_;
 };
 
 enum
@@ -142,6 +143,7 @@ enum
   PROP_VOLUME,
   PROP_MUTE,
   PROP_PCR_MASTER,
+  PROP_RESAMPLE_QUALITY,
   PROP_LAST
 };
 
@@ -298,6 +300,12 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Enable this mode for DVB/ATSC playback", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class,
+      PROP_RESAMPLE_QUALITY,
+      g_param_spec_uint ("resample-quality", "Set speex resampler quality",
+          "Adjust this value to meet both quality and performance request", 0, 10, 8,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   gstelement_class->change_state =
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_change_state);
   gstelement_class->provide_clock =
@@ -334,8 +342,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
 
   GST_OBJECT_FLAG_SET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
 
-
-
+  priv->resample_quality_ = 8;
   priv->direct_mode_ = TRUE;
   priv->received_eos = FALSE;
   priv->group_id = -1;
@@ -667,6 +674,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->pcr_master_ = g_value_get_boolean(value);
       GST_DEBUG_OBJECT (sink, "pcr master mode:%d", priv->pcr_master_);
       break;
+    case PROP_RESAMPLE_QUALITY:
+      priv->resample_quality_ = g_value_get_uint(value);
+      GST_DEBUG_OBJECT (sink, "resample quality :%d", priv->resample_quality_);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -696,6 +707,9 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       break;
     case PROP_PCR_MASTER:
       g_value_set_boolean (value, priv->pcr_master_);
+      break;
+    case PROP_RESAMPLE_QUALITY:
+      g_value_set_uint (value, priv->resample_quality_);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -1105,7 +1119,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           priv->src_target_rate = (guint32)(48000/segment.rate);
           priv->src = speex_resampler_init(2, 48000,
                   priv->src_target_rate,
-                  SPEEX_RESAMPLER_QUALITY_DEFAULT, &err);
+                  priv->resample_quality_, &err);
           if (!priv->src) {
               GST_ERROR_OBJECT(sink, "can not create src");
               result = FALSE;
