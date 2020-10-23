@@ -133,6 +133,9 @@ struct _GstAmlHalAsinkPrivate
   guint32 buf_src_len;
   guint32 src_target_rate;
   guint32 resample_quality_;
+
+  /* pause pts */
+  uint32_t pause_pts;
 };
 
 enum
@@ -144,7 +147,14 @@ enum
   PROP_MUTE,
   PROP_PCR_MASTER,
   PROP_RESAMPLE_QUALITY,
+  PROP_PAUSE_PTS,
   PROP_LAST
+};
+
+enum
+{
+  SIGNAL_PAUSEPTS,
+  MAX_SIGNAL
 };
 
 #define COMMON_AUDIO_CAPS \
@@ -193,11 +203,19 @@ gst_ahal_output_port_get_type (void)
 
 /* class initialization */
 #define gst_aml_hal_asink_parent_class parent_class
+#if GST_CHECK_VERSION(1,14,0)
+G_DEFINE_TYPE_WITH_CODE (GstAmlHalAsink, gst_aml_hal_asink, GST_TYPE_BASE_SINK,
+  GST_DEBUG_CATEGORY_INIT (gst_aml_hal_asink_debug_category, "amlhalasink", 0,
+  "debug category for amlhalasink element");G_ADD_PRIVATE(GstAmlHalAsink));
+#else
 G_DEFINE_TYPE_WITH_CODE (GstAmlHalAsink, gst_aml_hal_asink, GST_TYPE_BASE_SINK,
   GST_DEBUG_CATEGORY_INIT (gst_aml_hal_asink_debug_category, "amlhalasink", 0,
   "debug category for amlhalasink element");
   G_IMPLEMENT_INTERFACE (GST_TYPE_STREAM_VOLUME, NULL)
   );
+#endif
+
+static guint g_signals[MAX_SIGNAL]= {0};
 
 static gboolean gst_aml_hal_asink_open (GstAmlHalAsink* sink);
 static gboolean gst_aml_hal_asink_close (GstAmlHalAsink* asink);
@@ -256,7 +274,10 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   gstelement_class = (GstElementClass *) klass;
   gstbasesink_class = (GstBaseSinkClass *) klass;
 
+#if GST_CHECK_VERSION(1,14,0)
+#else
   g_type_class_add_private (klass, sizeof (GstAmlHalAsinkPrivate));
+#endif
 
   /* Setting up pads and setting metadata should be moved to
      base_class_init if you intend to subclass this class. */
@@ -306,6 +327,17 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Adjust this value to meet both quality and performance request", 0, 10, 8,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
+      G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
+      (GSignalFlags) (G_SIGNAL_RUN_LAST),
+      0,    /* class offset */
+      NULL, /* accumulator */
+      NULL, /* accu data */
+      g_cclosure_marshal_VOID__UINT_POINTER,
+      G_TYPE_NONE,
+      1,
+      G_TYPE_UINT);
+
   gstelement_class->change_state =
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_change_state);
   gstelement_class->provide_clock =
@@ -327,7 +359,11 @@ static void
 gst_aml_hal_asink_init (GstAmlHalAsink* sink)
 {
   GstBaseSink *basesink;
+#if GST_CHECK_VERSION(1,14,0)
+  GstAmlHalAsinkPrivate *priv = gst_aml_hal_asink_get_instance_private (sink);
+#else
   GstAmlHalAsinkPrivate *priv = GST_AML_HAL_ASINK_GET_PRIVATE (sink);
+#endif
 
   sink->priv = priv;
   sink->provided_clock = gst_audio_clock_new ("GstAmlSinkClock",
@@ -346,6 +382,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->direct_mode_ = TRUE;
   priv->received_eos = FALSE;
   priv->group_id = -1;
+  priv->pause_pts = -1;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
 }
@@ -357,7 +394,11 @@ gst_aml_hal_asink_dispose (GObject * object)
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
   if (sink->provided_clock) {
+#if GST_CHECK_VERSION(1,14,0)
+    gst_audio_clock_invalidate (GST_AUDIO_CLOCK(sink->provided_clock));
+#else
     gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
+#endif
     gst_object_unref (sink->provided_clock);
     sink->provided_clock = NULL;
   }
@@ -561,6 +602,22 @@ static int get_sysfs_uint32(const char *path, uint32_t *value)
     return 0;
 }
 
+static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  uint32_t pts_90k;
+
+  if (priv->pause_pts == -1)
+    return;
+
+  pts_90k = gst_util_uint64_scale_int (ts, PTS_90K, GST_SECOND);
+  if (pts_90k > priv->pause_pts) {
+    GST_WARNING_OBJECT (sink, "emit pause pts signal %u", pts_90k);
+    g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_PAUSEPTS], pts_90k, NULL);
+    priv->pause_pts = -1;
+  }
+}
+
 /* we call this function without holding the lock on sink for performance
  * reasons. Try hard to not deal with and invalid ringbuffer and rate. */
 static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink * sink)
@@ -577,6 +634,7 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
   if (!priv->direct_mode_) {
     //TODO(song): get HAL render position
     result = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
+    check_pause_pts (sink, result);
     goto done;
   }
 
@@ -587,6 +645,7 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
 
   get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
   result = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
+  check_pause_pts (sink, result);
 
 done:
   GST_LOG_OBJECT (sink, "time %" GST_TIME_FORMAT " 0x%x", GST_TIME_ARGS (result), pcr);
@@ -678,6 +737,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->resample_quality_ = g_value_get_uint(value);
       GST_DEBUG_OBJECT (sink, "resample quality :%d", priv->resample_quality_);
       break;
+    case PROP_PAUSE_PTS:
+      priv->pause_pts = g_value_get_uint (value);
+      GST_WARNING_OBJECT (sink, "pause PTS %u", priv->pause_pts);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -710,6 +773,9 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       break;
     case PROP_RESAMPLE_QUALITY:
       g_value_set_uint (value, priv->resample_quality_);
+      break;
+    case PROP_PAUSE_PTS:
+      g_value_set_uint (value, priv->pause_pts);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
