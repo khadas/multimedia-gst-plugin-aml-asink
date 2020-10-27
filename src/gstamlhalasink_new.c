@@ -919,7 +919,7 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink, GstClockTime time)
       break;
     }
 
-    if (now < time) {
+    if (now < time - GST_MSECOND) {
       if (priv->quit_clock_wait) {
         ret = GST_CLOCK_UNSCHEDULED;
         break;
@@ -2257,6 +2257,11 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
          priv->first_pts_set = TRUE;
          priv->first_pts = pts_32;
          GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
+      }
+    } else if (raw_data) {
+      /* audio hal can not handle too big frame, limit to 4K*/
+      if (cur_size > 4*1024) {
+        cur_size = 4*1024;
       }
     }
 
