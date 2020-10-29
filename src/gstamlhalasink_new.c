@@ -1491,7 +1491,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
   switch (transition) {
     case GST_STATE_CHANGE_NULL_TO_READY:
     {
-      GST_DEBUG_OBJECT(sink, "null to ready");
+      GST_INFO_OBJECT(sink, "null to ready");
       gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
 
       if (!gst_aml_hal_asink_open (sink)) {
@@ -1508,7 +1508,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       break;
     }
     case GST_STATE_CHANGE_READY_TO_PAUSED:
-      GST_DEBUG_OBJECT(sink, "ready to paused");
+      GST_INFO_OBJECT(sink, "ready to paused");
       gst_base_sink_set_async_enabled (GST_BASE_SINK_CAST(sink), FALSE);
       if (priv->direct_mode_)
         tsync_reset_pcr (sink);
@@ -1527,7 +1527,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       break;
     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
     {
-      GST_DEBUG_OBJECT(sink, "paused to playing");
+      GST_INFO_OBJECT(sink, "paused to playing");
 
       GST_OBJECT_LOCK (sink);
       hal_start (sink);
@@ -1547,7 +1547,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
     {
       GstBaseSink* bsink = GST_BASE_SINK_CAST (sink);
-      GST_DEBUG_OBJECT(sink, "playing to paused");
+      GST_INFO_OBJECT(sink, "playing to paused");
       GST_OBJECT_LOCK (sink);
       hal_pause (sink);
       /* To complete transition to paused state in async_enabled mode,
@@ -1561,7 +1561,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       break;
     }
     case GST_STATE_CHANGE_PAUSED_TO_READY:
-      GST_DEBUG_OBJECT(sink, "paused to ready");
+      GST_INFO_OBJECT(sink, "paused to ready");
       /* Only post clock-lost messages if this is the clock that
        * we've created. If the subclass has overriden it the subclass
        * should post this messages whenever necessary */
@@ -1603,7 +1603,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       gst_clock_set_master (sink->provided_clock, NULL);
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:
-      GST_DEBUG_OBJECT(sink, "ready to null");
+      GST_INFO_OBJECT(sink, "ready to null");
       GST_OBJECT_LOCK (sink);
       hal_close_device (sink);
       GST_OBJECT_UNLOCK (sink);
