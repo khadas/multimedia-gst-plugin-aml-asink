@@ -2321,7 +2321,10 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
 
       if (!priv->first_pts_set) {
          priv->first_pts_set = TRUE;
-         priv->first_pts = pts_32;
+         if (priv->segment.start)
+           priv->first_pts = pts_32;
+         else
+           priv->first_pts = 0;
          GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
       }
     } else if (raw_data) {
