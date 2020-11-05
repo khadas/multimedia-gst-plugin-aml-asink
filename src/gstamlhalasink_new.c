@@ -262,6 +262,7 @@ static int tsync_enable (GstAmlHalAsink * sink, gboolean enable);
 static void dump(const char* path, const uint8_t *data, int size);
 static int tsync_send_audio_event(const char* event);
 static int tsync_reset_pcr (GstAmlHalAsink * sink);
+static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts);
 
 static void
 gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
@@ -327,6 +328,11 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Adjust this value to meet both quality and performance request", 0, 10, 8,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_PAUSE_PTS,
+      g_param_spec_uint ("pause-pts", "pause pts",
+        "notify arrival of pts (90KHz), caller should pause the sink, set it in READY state",
+        0, G_MAXUINT, 0, G_PARAM_WRITABLE));
+
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
       (GSignalFlags) (G_SIGNAL_RUN_LAST),
@@ -335,8 +341,9 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       NULL, /* accu data */
       g_cclosure_marshal_VOID__UINT_POINTER,
       G_TYPE_NONE,
-      1,
-      G_TYPE_UINT);
+      2,
+      G_TYPE_UINT,
+      G_TYPE_POINTER);
 
   gstelement_class->change_state =
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_change_state);
@@ -502,6 +509,7 @@ gst_aml_hal_asink_query (GstElement * element, GstQuery * query)
       if ((res = get_position (sink, format, &cur))) {
         gst_query_set_position (query, format, cur);
         GST_LOG_OBJECT (sink, "position %lld format %s", cur, gst_format_get_name (format));
+        check_pause_pts (sink, cur);
       }
       break;
     }
@@ -613,7 +621,7 @@ static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts)
   pts_90k = gst_util_uint64_scale_int (ts, PTS_90K, GST_SECOND);
   if (pts_90k > priv->pause_pts) {
     GST_WARNING_OBJECT (sink, "emit pause pts signal %u", pts_90k);
-    g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_PAUSEPTS], pts_90k, NULL);
+    g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_PAUSEPTS], 0, pts_90k, NULL);
     priv->pause_pts = -1;
   }
 }
@@ -634,7 +642,6 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
   if (!priv->direct_mode_) {
     //TODO(song): get HAL render position
     result = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
-    check_pause_pts (sink, result);
     goto done;
   }
 
@@ -645,7 +652,6 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
 
   get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
   result = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
-  check_pause_pts (sink, result);
 
 done:
   GST_LOG_OBJECT (sink, "time %" GST_TIME_FORMAT " 0x%x", GST_TIME_ARGS (result), pcr);
