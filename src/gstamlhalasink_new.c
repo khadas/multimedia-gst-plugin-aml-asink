@@ -380,6 +380,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->received_eos = FALSE;
   priv->group_id = -1;
   priv->pause_pts = -1;
+  priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
@@ -1148,13 +1149,17 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     {
       GstSegment segment;
       gst_event_copy_segment (event, &segment);
+      GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
+              &segment);
 
       if (segment.start != GST_CLOCK_TIME_NONE) {
         GstMessage *seg_rec;
 
-        gst_event_copy_segment (event, &priv->segment);
-        GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
-            &priv->segment);
+        if (priv->segment.rate != 0.0 && priv->segment.rate != segment.rate) {
+          GST_INFO_OBJECT (sink, "ignore rate %f keep %f", segment.rate, priv->segment.rate);
+          segment.rate = priv->segment.rate;
+        }
+        priv->segment = segment;
         seg_rec = gst_message_new_info_with_details (GST_OBJECT_CAST (sink),
             NULL, "segment-received", gst_structure_new_empty("segment-received"));
         if (seg_rec)
