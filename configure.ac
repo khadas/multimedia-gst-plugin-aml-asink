@@ -6,7 +6,6 @@ AC_INIT([aml-asink-plugin-package],[1.0.0])
 
 dnl required versions of gstreamer and plugins-base
 GST_REQUIRED=1.0.0
-SPEEX_REQUIRED=1.2
 
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_HEADERS([config.h])
@@ -42,14 +41,6 @@ dnl for libgstinterfaces-1.0: gstreamer-interfaces-1.0 >= $GST_REQUIRED
 dnl for libgstrtp-1.0: gstreamer-rtp-1.0 >= $GST_REQUIRED
 dnl for libgstrtsp-1.0: gstreamer-rtsp-1.0 >= $GST_REQUIRED
 dnl etc.
-PKG_CHECK_MODULES(SPEEX, [speexdsp >= $SPEEX_REQUIRED
-], [
-  AC_SUBST(SPEEX_CFLAGS)
-  AC_SUBST(SPEEX_LIBS)
-], [
-  AC_MSG_ERROR([speexdsp not found])
-])
-
 PKG_CHECK_MODULES(GST, [
   gstreamer-1.0 >= $GST_REQUIRED
   gstreamer-base-1.0 >= $GST_REQUIRED

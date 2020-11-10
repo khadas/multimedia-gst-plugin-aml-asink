@@ -33,8 +33,9 @@
 #include <speex/speex_resampler.h>
 #include "gstamlhalasink_new.h"
 #include "ac4_frame_parse.h"
+#include "scaletempo.h"
 
-GST_DEBUG_CATEGORY_STATIC (gst_aml_hal_asink_debug_category);
+GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_CAT_DEFAULT gst_aml_hal_asink_debug_category
 
 #define GST_AML_HAL_ASINK_GET_PRIVATE(obj)  \
@@ -127,12 +128,9 @@ struct _GstAmlHalAsinkPrivate
   guint group_id;
   gboolean group_done;
 
-  /* resmapler for trick play*/
-  SpeexResamplerState *src;
-  uint8_t *buf_src;
-  guint32 buf_src_len;
-  guint32 src_target_rate;
-  guint32 resample_quality_;
+  /* tempo stretch */
+  struct scale_tempo st;
+  gboolean trick_play;
 
   /* pause pts */
   uint32_t pause_pts;
@@ -146,7 +144,6 @@ enum
   PROP_VOLUME,
   PROP_MUTE,
   PROP_PCR_MASTER,
-  PROP_RESAMPLE_QUALITY,
   PROP_PAUSE_PTS,
   PROP_LAST
 };
@@ -322,12 +319,6 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Enable this mode for DVB/ATSC playback", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-  g_object_class_install_property (gobject_class,
-      PROP_RESAMPLE_QUALITY,
-      g_param_spec_uint ("resample-quality", "Set speex resampler quality",
-          "Adjust this value to meet both quality and performance request", 0, 10, 8,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_PAUSE_PTS,
       g_param_spec_uint ("pause-pts", "pause pts",
         "notify arrival of pts (90KHz), caller should pause the sink, set it in READY state",
@@ -385,13 +376,13 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
 
   GST_OBJECT_FLAG_SET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
 
-  priv->resample_quality_ = 8;
   priv->direct_mode_ = TRUE;
   priv->received_eos = FALSE;
   priv->group_id = -1;
   priv->pause_pts = -1;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
+  scaletempo_init (&priv->st);
 }
 
 static void
@@ -739,10 +730,6 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->pcr_master_ = g_value_get_boolean(value);
       GST_DEBUG_OBJECT (sink, "pcr master mode:%d", priv->pcr_master_);
       break;
-    case PROP_RESAMPLE_QUALITY:
-      priv->resample_quality_ = g_value_get_uint(value);
-      GST_DEBUG_OBJECT (sink, "resample quality :%d", priv->resample_quality_);
-      break;
     case PROP_PAUSE_PTS:
       priv->pause_pts = g_value_get_uint (value);
       GST_WARNING_OBJECT (sink, "pause PTS %u", priv->pause_pts);
@@ -776,9 +763,6 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       break;
     case PROP_PCR_MASTER:
       g_value_set_boolean (value, priv->pcr_master_);
-      break;
-    case PROP_RESAMPLE_QUALITY:
-      g_value_set_uint (value, priv->resample_quality_);
       break;
     case PROP_PAUSE_PTS:
       g_value_set_uint (value, priv->pause_pts);
@@ -908,6 +892,8 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   /* We need to resync since the ringbuffer restarted */
   gst_aml_hal_asink_reset_sync (sink);
 
+  scaletempo_set_info (&priv->st, &priv->spec.info);
+
   gst_element_post_message (GST_ELEMENT_CAST (bsink),
       gst_message_new_latency (GST_OBJECT (bsink)));
 
@@ -942,6 +928,8 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   priv->wrapping_time = 0;
   priv->last_pcr = 0;
   gst_caps_replace (&priv->spec.caps, NULL);
+  scaletempo_stop (&priv->st);
+  priv->trick_play = FALSE;
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
@@ -1183,41 +1171,23 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       /* prepare for trick play */
       if (segment.rate != 1 && segment.rate != 0
               && priv->format_ == AUDIO_FORMAT_PCM_16_BIT) {
-          int err;
+        priv->trick_play = TRUE;
+        scaletempo_start (&priv->st);
+        scaletempo_update_segment (&priv->st, &priv->segment);
 
-          if (priv->src)
-              speex_resampler_destroy(priv->src);
-
-          priv->src_target_rate = (guint32)(48000/segment.rate);
-          priv->src = speex_resampler_init(2, 48000,
-                  priv->src_target_rate,
-                  priv->resample_quality_, &err);
-          if (!priv->src) {
-              GST_ERROR_OBJECT(sink, "can not create src");
-              result = FALSE;
-              goto done;
-          }
-          GST_INFO_OBJECT (sink, "SRC created, rate:%f target_rate:%d",
-              segment.rate, priv->src_target_rate);
-          if (priv->direct_mode_) {
-              update_pcr_speed(segment.rate);
-              GST_INFO_OBJECT (sink, "pcr rate updated");
-          }
+        if (priv->direct_mode_) {
+          update_pcr_speed(segment.rate);
+          GST_INFO_OBJECT (sink, "pcr rate updated");
+        }
       } else if (segment.rate == 1) {
-          if (priv->src) {
-              speex_resampler_destroy(priv->src);
-              priv->src = NULL;
-              if (priv->direct_mode_) {
-                  update_pcr_speed(1);
-                  GST_INFO_OBJECT (sink, "pcr rate recovered");
-              }
-              GST_INFO_OBJECT (sink, "SRC destroyed");
-          }
-          if (priv->buf_src) {
-              g_free (priv->buf_src);
-              priv->buf_src = NULL;
-              priv->buf_src_len = 0;
-          }
+        if (priv->trick_play) {
+          scaletempo_stop (&priv->st);
+          priv->trick_play = FALSE;
+        }
+        if (priv->direct_mode_) {
+          update_pcr_speed(1);
+          GST_INFO_OBJECT (sink, "pcr rate recovered");
+        }
       }
       break;
     }
@@ -1250,6 +1220,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       priv->group_done = TRUE;
       GST_OBJECT_UNLOCK (sink);
       gst_aml_hal_asink_reset_sync (sink);
+      break;
     }
     default:
     {
@@ -1303,39 +1274,6 @@ after_eos:
     result = FALSE;
     goto done;
   }
-}
-
-static int trick_play (GstAmlHalAsink * sink, uint8_t *data, gint len)
-{
-    GstAmlHalAsinkPrivate *priv = sink->priv;
-    uint32_t in_sam = len / 4, out_sam;
-    int ret;
-    int buf_size = len / priv->segment.rate + 10;
-
-    if (priv->buf_src_len < buf_size) {
-        uint8_t *tmp;
-        tmp = g_realloc (priv->buf_src, buf_size);
-        if (!tmp) {
-            GST_ERROR_OBJECT (sink, "oom");
-            g_free (priv->buf_src);
-            return -1;
-        } else {
-            priv->buf_src_len = buf_size;
-            priv->buf_src = tmp;
-        }
-    }
-    out_sam = priv->buf_src_len/4;
-    ret = speex_resampler_process_interleaved_int (priv->src,
-            (spx_int16_t *)data, &in_sam,
-            (spx_int16_t *)priv->buf_src, &out_sam);
-    if (ret != RESAMPLER_ERR_SUCCESS) {
-        GST_ERROR_OBJECT (sink, "speex fail %d", ret);
-    }
-    if (in_sam != len / 4) {
-        GST_WARNING_OBJECT (sink, "not fully processed %d vs %d",
-            in_sam, len / 4);
-    }
-    return out_sam * 4;
 }
 
 static GstFlowReturn
@@ -1408,20 +1346,37 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   priv->eos_time = cstop;
 
+  if (priv->trick_play) {
+    GstBuffer *outbuffer = NULL;
+    gsize insize, outsize;
+
+    insize = gst_buffer_get_size (buf);
+    scaletempo_transform_size (&priv->st, insize, &outsize);
+    GST_LOG_OBJECT (sink, "in:%d out:%d", insize, outsize);
+
+    outbuffer = gst_buffer_new_allocate (NULL, outsize, NULL);
+    if (!outbuffer) {
+      GST_ERROR_OBJECT (sink, "out buffer fail %d", outsize);
+      ret = GST_FLOW_ERROR;
+      gst_buffer_unref (buf);
+      goto done;
+    }
+    gst_buffer_copy_into (outbuffer, buf, GST_BUFFER_COPY_METADATA, 0, -1);
+
+    scaletempo_transform (&priv->st, buf, outbuffer);
+    gst_buffer_unref (buf);
+
+    buf = outbuffer;
+    if (!gst_buffer_get_size(buf)) {
+      /* lenth 0 can not be commited */
+      priv->render_samples += samples;
+      goto done;
+    }
+  }
+
   gst_buffer_map (buf, &info, GST_MAP_READ);
   data = info.data;
   size = info.size;
-
-  //trick play
-  if (priv->src) {
-      int rc;
-      rc = trick_play (sink, data, size);
-      if (rc > 0) {
-          data = priv->buf_src;
-          size = rc;
-      }
-      GST_LOG_OBJECT (sink, "SRC in:%d out:%d", info.size, size);
-  }
 
   g_mutex_lock(&priv->feed_lock);
   /* blocked on paused */
@@ -1581,19 +1536,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       GST_OBJECT_LOCK (sink);
       hal_release (sink);
       priv->quit_clock_wait = TRUE;
-      if (priv->src) {
-          speex_resampler_destroy (priv->src);
-          priv->src = NULL;
-          if (priv->direct_mode_) {
-              update_pcr_speed(1);
-              GST_INFO_OBJECT (sink, "pcr rate recovered");
-          }
-      }
-      if (priv->buf_src) {
-          g_free (priv->buf_src);
-          priv->buf_src = NULL;
-          priv->buf_src_len = 0;
-      }
+
       gst_aml_hal_asink_reset_sync (sink);
       GST_OBJECT_UNLOCK (sink);
       break;

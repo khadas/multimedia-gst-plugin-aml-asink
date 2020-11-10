@@ -14,11 +14,11 @@ plugin_LTLIBRARIES = libgstamlhalasink.la
 ##############################################################################
 
 # sources used to compile this plug-in
-libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c ac4_frame_parse.c
+libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c ac4_frame_parse.c scaletempo.c
 
 # compiler and linker flags used to compile this plugin, set in configure.ac
-libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS) $(SPEEX_CFLAGS)
-libgstamlhalasink_la_LIBADD = $(GST_LIBS) $(SPEEX_LIBS)
+libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS)
+libgstamlhalasink_la_LIBADD = $(GST_LIBS)
 libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
