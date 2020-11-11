@@ -310,7 +310,7 @@ gboolean scaletempo_transform_size (struct scale_tempo * scaletempo,
 
   bytes_to_out = size + scaletempo->bytes_queued - scaletempo->bytes_to_slide;
   if (bytes_to_out < (gint) scaletempo->bytes_queue_max) {
-    GST_INFO ("size %d bytes_to_out %d queued %d slide %d max %d",
+    GST_TRACE ("size %d bytes_to_out %d queued %d slide %d max %d",
         size, bytes_to_out, scaletempo->bytes_queued,
         scaletempo->bytes_to_slide, scaletempo->bytes_queue_max);
     *othersize = 0;
