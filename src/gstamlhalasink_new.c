@@ -820,7 +820,7 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
 
     gst_structure_get_int (structure, "channels", &info.channels);
     spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_EAC3;
-    info.bpf = 16;
+    info.bpf = 1;
   } else if (g_str_equal (mimetype, "audio/x-dts")) {
     /* extract the needed information from the cap */
     if (!(gst_structure_get_int (structure, "rate", &info.rate)))
