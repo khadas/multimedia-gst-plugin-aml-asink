@@ -1804,12 +1804,14 @@ static gboolean hal_release (GstAmlHalAsink * sink)
   GST_INFO_OBJECT (sink, "enter");
 
   hal_stop(sink);
+  g_mutex_lock(&priv->feed_lock);
   if (priv->stream_) {
     priv->hw_dev_->close_output_stream(priv->hw_dev_, priv->stream_);
     priv->stream_ = NULL;
     priv->paused_ = FALSE;
     priv->render_samples = 0;
   }
+  g_mutex_unlock(&priv->feed_lock);
 
   GST_INFO_OBJECT(sink, "done");
   return TRUE;
@@ -2173,6 +2175,11 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
   guint offset = 0;
   guint parsed = 0;
   guint hw_header_s = sizeof (struct hw_sync_header_v2);
+
+  if (!priv->stream_) {
+    GST_WARNING_OBJECT (sink, "stream closed");
+    return 0;
+  }
 
   raw_data = is_raw_type(priv->spec.type);
   towrite = size;
