@@ -30,7 +30,6 @@
 #include <pthread.h>
 #include <gst/audio/audio.h>
 #include <audio_if_client.h>
-#include <speex/speex_resampler.h>
 #include "gstamlhalasink_new.h"
 #include "ac4_frame_parse.h"
 #include "scaletempo.h"
