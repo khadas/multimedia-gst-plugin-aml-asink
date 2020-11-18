@@ -324,7 +324,7 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   g_object_class_install_property (gobject_class,
       PROP_MUTE,
       g_param_spec_boolean ("mute", "Mute",
-          "Mute state of this stream", FALSE,
+          "Mute state of system", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
@@ -734,13 +734,34 @@ gst_aml_hal_sink_set_mute (GstAmlHalAsink * sink, gboolean mute)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   int ret;
 
-  GST_DEBUG_OBJECT (sink, "set mute:%d", mute);
-  //TODO: implement in audio hal, mute the amplifier
+  GST_WARNING_OBJECT (sink, "set mute:%d", mute);
   ret = priv->hw_dev_->set_master_mute( priv->hw_dev_, mute);
   if (ret)
     GST_ERROR_OBJECT(sink, "mute fail:%d", ret);
   else
     priv->mute_ = mute;
+}
+
+static gboolean
+gst_aml_hal_sink_get_mute (GstAmlHalAsink * sink)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  gboolean mute = 0;
+  int ret;
+
+  if (!priv->hw_dev_) {
+    GST_ERROR_OBJECT(sink, "audio HAL not open yet");
+    return mute;
+  }
+
+  ret = priv->hw_dev_->get_master_mute(priv->hw_dev_, &mute);
+  if (ret) {
+    GST_ERROR_OBJECT(sink, "get_master_mute fail: %d",ret);
+    return mute;
+  }
+  GST_LOG_OBJECT (sink, "master mute:%d", mute);
+
+  return mute;
 }
 
 
@@ -811,6 +832,7 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       g_value_set_double (value, priv->stream_volume); 
       break;
     case PROP_MUTE:
+      priv->mute_ = gst_aml_hal_sink_get_mute(sink);
       g_value_set_boolean (value, priv->mute_);
       break;
     case PROP_PCR_MASTER:
