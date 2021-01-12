@@ -362,6 +362,11 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   gstbasesink_class->get_times =
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_get_times);
 
+  gst_element_class_set_details_simple (gstelement_class, "AmlHalAsink",
+      "Decoder/Sink/Audio",
+      "Gstreamer sink plugin for audio HAL",
+      "Amlogic");
+
   /* ref class from a thread-safe context to work around missing bit of
    * thread-safety in GObject */
   g_type_class_ref (GST_TYPE_AUDIO_CLOCK);
