@@ -61,6 +61,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define TSYNC_EVENT  "/sys/class/tsync/event"
 #define TSYNC_MODE   "/sys/class/tsync/mode"
 #define TSYNC_PCRSCR "/sys/class/tsync/pts_pcrscr"
+#define TSYNC_APTS "/sys/class/tsync/pts_audio"
 #define AUDIO_PAUSE_EVENT "AUDIO_PAUSE"
 #define AUDIO_RESUME_EVENT "AUDIO_RESUME"
 #define PTS_90K 90000
@@ -1923,6 +1924,13 @@ static int config_sys_node(const char* path, const char* value)
   return 0;
 }
 
+static int tsync_set_first_apts(uint32_t pts)
+{
+  char val[20];
+  snprintf (val, sizeof(val), "%u", pts);
+  return config_sys_node(TSYNC_APTS, val);
+}
+
 static int tsync_send_audio_event(const char* event)
 {
   char *val;
@@ -2375,6 +2383,8 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
          else
            priv->first_pts = 0;
          GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
+         if (!priv->pcr_master_)
+           tsync_set_first_apts(priv->first_pts);
       }
     } else if (raw_data) {
       /* audio hal can not handle too big frame, limit to 4K*/
