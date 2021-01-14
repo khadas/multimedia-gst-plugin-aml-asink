@@ -77,6 +77,15 @@ else
 fi
 AC_SUBST(plugindir)
 
+AC_ARG_ENABLE([xrun-detection],
+[  --enable-xrun-detection Turn on underrun detection],
+[case "${enableval}" in
+  yes) xrun=true ;;
+  no)  xrun=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-xrun-detection]) ;;
+esac],[xrun-detection=false])
+AM_CONDITIONAL([XRUN], [test x$xrun = xtrue])
+
 dnl set proper LDFLAGS for plugins
 GST_PLUGIN_LDFLAGS='-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\).*'
 AC_SUBST(GST_PLUGIN_LDFLAGS)

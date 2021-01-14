@@ -142,6 +142,12 @@ struct _GstAmlHalAsinkPrivate
   /* stream volume */
   gboolean stream_volume_pending;
   float stream_volume;
+
+  /* underrun detection */
+  GThread *xrun_thread;
+  gboolean quit_xrun_thread;
+  GTimer *xrun_timer;
+  gboolean xrun_paused;
 };
 
 enum
@@ -1181,6 +1187,10 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       }
       GST_OBJECT_LOCK (sink);
       priv->eos = TRUE;
+      if (priv->xrun_timer) {
+        g_timer_stop (priv->xrun_timer);
+        priv->xrun_paused = false;
+      }
       GST_OBJECT_UNLOCK (sink);
 
       /* ok, now we can post the message */
@@ -1215,6 +1225,10 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       GST_DEBUG_OBJECT (sink, "flush stop");
       GST_OBJECT_LOCK (sink);
       hal_stop (sink);
+      if (priv->xrun_timer) {
+        g_timer_stop(priv->xrun_timer);
+        priv->xrun_paused = false;
+      }
       tsync_enable (sink, TRUE);
       GST_OBJECT_UNLOCK (sink);
 
@@ -1365,6 +1379,61 @@ after_eos:
   }
 }
 
+static gpointer xrun_thread(gpointer para)
+{
+  GstAmlHalAsink *sink = (GstAmlHalAsink *)para;
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  GST_INFO_OBJECT (sink, "enter");
+  while (!priv->quit_xrun_thread) {
+    /* cobalt cert requires pause avsync to stop video rendering */
+    if (!priv->xrun_paused &&
+           g_timer_elapsed(priv->xrun_timer, NULL) > 0.5) {
+      GST_INFO_OBJECT (sink, "xrun timer triggered pause tsync");
+      tsync_send_audio_event(AUDIO_PAUSE_EVENT);
+      priv->xrun_paused = true;
+    }
+    usleep(50000);
+  }
+  GST_INFO_OBJECT (sink, "quit");
+  return NULL;
+}
+
+static int start_xrun_thread (GstAmlHalAsink * sink)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  priv->xrun_timer = g_timer_new ();
+  if (!priv->xrun_timer) {
+    GST_ERROR_OBJECT (sink, "create timer fail");
+    return -1;
+  }
+
+  priv->quit_xrun_thread = FALSE;
+  priv->xrun_thread = g_thread_new ("axrun_render", xrun_thread, sink);
+  if (!priv->xrun_thread) {
+    GST_ERROR_OBJECT (sink, "create thread fail");
+    g_timer_destroy (priv->xrun_timer);
+    priv->xrun_timer = NULL;
+    return -1;
+  }
+  return 0;
+}
+
+static void stop_xrun_thread (GstAmlHalAsink * sink)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  if (priv->xrun_thread) {
+    priv->quit_xrun_thread = TRUE;
+    g_thread_join (priv->xrun_thread);
+    priv->xrun_thread = NULL;
+    g_timer_destroy (priv->xrun_timer);
+    priv->xrun_timer = NULL;
+    priv->xrun_paused = false;
+  }
+}
+
 static GstFlowReturn
 gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 {
@@ -1483,6 +1552,21 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   g_mutex_unlock(&priv->feed_lock);
   gst_buffer_unmap (buf, &info);
   priv->render_samples += samples;
+
+#ifdef ENABLE_XRUN_DETECTION
+  GST_OBJECT_LOCK (sink);
+  if (!priv->pcr_master_ && priv->stream_ &&
+      !priv->xrun_thread &&
+      start_xrun_thread (sink)) {
+    ret = GST_FLOW_ERROR;
+    GST_OBJECT_UNLOCK (sink);
+    goto done;
+  }
+
+  if (priv->xrun_timer)
+    g_timer_start(priv->xrun_timer);
+  GST_OBJECT_UNLOCK (sink);
+#endif
 
   ret = GST_FLOW_OK;
 done:
@@ -1608,6 +1692,8 @@ gst_aml_hal_asink_change_state (GstElement * element,
       /* To complete transition to paused state in async_enabled mode,
        * we need a preroll buffer pushed to the pad.
        * This is a workaround to avoid the need for preroll buffer. */
+      if (priv->xrun_timer)
+        g_timer_stop (priv->xrun_timer);
       GST_BASE_SINK_PREROLL_LOCK (bsink);
       bsink->have_preroll = 1;
       GST_BASE_SINK_PREROLL_UNLOCK (bsink);
@@ -1632,6 +1718,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       priv->quit_clock_wait = TRUE;
 
       gst_aml_hal_asink_reset_sync (sink);
+      stop_xrun_thread (sink);
       GST_OBJECT_UNLOCK (sink);
       break;
     default:

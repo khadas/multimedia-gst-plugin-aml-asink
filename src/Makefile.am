@@ -23,5 +23,9 @@ libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
 
+if XRUN
+libgstamlhalasink_la_CFLAGS += -DENABLE_XRUN_DETECTION
+endif
+
 # headers we need but don't want installed
 #noinst_HEADERS = 
