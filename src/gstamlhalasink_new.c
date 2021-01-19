@@ -113,6 +113,7 @@ struct _GstAmlHalAsinkPrivate
 
   gboolean quit_clock_wait;
   GstClockTime eos_time;
+  GstClockTime eos_end_time;
 
   GstClockTime last_ts;
   guint64 render_samples;
@@ -463,6 +464,11 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   uint32_t pcr = 0;
   gint64 timepassed_90k, timepassed;
 
+  if (priv->group_done) {
+    *cur = GST_CLOCK_TIME_NONE;
+    return TRUE;
+  }
+
   if (!priv->render_samples) {
     *cur = 0;
     return TRUE;
@@ -652,6 +658,14 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
   GstClockTime result = GST_CLOCK_TIME_NONE;
   GstAmlHalAsinkPrivate *priv = sink->priv;
   uint32_t pcr = 0;
+
+  if (priv->group_done) {
+    /* return a little bigger time for basesink of other module
+     * to behavior correctly. basink assume clock keeps
+     * going to exit wait loop */
+    result = priv->eos_end_time + 100 * GST_MSECOND;
+    goto done;
+  }
 
   if (!priv->render_samples) {
     result = priv->segment.start;
@@ -1032,10 +1046,12 @@ static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer
   *end = GST_CLOCK_TIME_NONE;
 }
 
+#if 0
 static void sink_force_start (GstAmlHalAsink * sink)
 {
   hal_start (sink);
 }
+#endif
 
 static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink, GstClockTime time)
 {
@@ -1132,11 +1148,12 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
 static GstFlowReturn
 gst_aml_hal_asink_wait_event (GstBaseSink * bsink, GstEvent * event)
 {
-  GstAmlHalAsink *sink = GST_AML_HAL_ASINK (bsink);
-  GstAmlHalAsinkPrivate *priv = sink->priv;
+  //GstAmlHalAsink *sink = GST_AML_HAL_ASINK (bsink);
+  //GstAmlHalAsinkPrivate *priv = sink->priv;
   GstFlowReturn ret = GST_FLOW_OK;
 
   switch (GST_EVENT_TYPE (event)) {
+#if 0
     case GST_EVENT_GAP:
       /* We must have a negotiated format before starting */
       if (G_UNLIKELY (!priv->stream_)) {
@@ -1150,6 +1167,7 @@ gst_aml_hal_asink_wait_event (GstBaseSink * bsink, GstEvent * event)
       sink_force_start (sink);
       GST_OBJECT_UNLOCK (sink);
       break;
+#endif
     default:
       break;
   }
@@ -1303,6 +1321,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           priv->group_id, group_id);
       priv->group_id = group_id;
       priv->group_done = FALSE;
+      priv->eos_end_time = GST_CLOCK_TIME_NONE;
       GST_DEBUG_OBJECT (sink, "stream start, gid %d", group_id);
       return GST_BASE_SINK_CLASS (parent_class)->event (bsink, event);
     }
@@ -1321,8 +1340,14 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       hal_stop (sink);
       tsync_enable (sink, TRUE);
       priv->group_done = TRUE;
+      priv->eos_end_time = priv->eos_time;
       GST_OBJECT_UNLOCK (sink);
       gst_aml_hal_asink_reset_sync (sink);
+      break;
+    }
+    case GST_EVENT_GAP:
+    {
+      GST_DEBUG_OBJECT (sink, "ignore event-gap");
       break;
     }
     default:
