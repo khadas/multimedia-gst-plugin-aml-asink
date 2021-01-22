@@ -470,7 +470,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   }
 
   if (!priv->render_samples) {
-    *cur = 0;
+    *cur = GST_CLOCK_TIME_NONE;
     return TRUE;
   }
 
@@ -667,10 +667,8 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
     goto done;
   }
 
-  if (!priv->render_samples) {
-    result = priv->segment.start;
+  if (!priv->render_samples)
     goto done;
-  }
 
   if (!priv->direct_mode_) {
     //TODO(song): get HAL render position
@@ -1035,6 +1033,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   gst_caps_replace (&priv->spec.caps, NULL);
   scaletempo_stop (&priv->st);
   priv->trick_play = FALSE;
+  priv->segment.start = GST_CLOCK_TIME_NONE;
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
