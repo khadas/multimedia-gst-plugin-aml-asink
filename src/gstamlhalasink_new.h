@@ -44,8 +44,6 @@ typedef struct _GstAmlHalAsinkPrivate GstAmlHalAsinkPrivate;
 
 struct _GstAmlHalAsink {
   GstBaseSink         element;
-  /* clock */
-  GstClock           *provided_clock;
   /*< private >*/
   GstAmlHalAsinkPrivate *priv;
 };
@@ -55,6 +53,8 @@ struct _GstAmlHalAsinkClass {
 };
 
 GType gst_aml_hal_asink_get_type (void);
+
+GstClock *gst_aml_hal_asink_get_clock (GstElement *element);
 
 G_END_DECLS
 

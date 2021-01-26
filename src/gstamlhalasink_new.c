@@ -36,8 +36,11 @@
 #include <time.h>
 #include <audio_if_client.h>
 #include "gstamlhalasink_new.h"
+#include "gstamlclock.h"
 #include "ac4_frame_parse.h"
 #include "scaletempo.h"
+#include "aml_avsync.h"
+#include "aml_avsync_log.h"
 
 #ifdef ESSOS_RM
 #include "essos-resmgr.h"
@@ -65,6 +68,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 
 #define GST_AUDIO_FORMAT_TYPE_AC4 100
 
+#if 0
 #define TSYNC_ENABLE "/sys/class/tsync/enable"
 #define TSYNC_EVENT  "/sys/class/tsync/event"
 #define TSYNC_MODE   "/sys/class/tsync/mode"
@@ -72,6 +76,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define TSYNC_APTS "/sys/class/tsync/pts_audio"
 #define AUDIO_PAUSE_EVENT "AUDIO_PAUSE"
 #define AUDIO_RESUME_EVENT "AUDIO_RESUME"
+#endif
 #define PTS_90K 90000
 
 #ifdef DUMP_TO_FILE
@@ -93,6 +98,7 @@ struct _GstAmlHalAsinkPrivate
   audio_patch_handle_t patch_h_;
   gboolean mute_;
 
+  /* condition lock for chain and other threads */
   GCond   run_ready;
   GMutex  feed_lock;
 
@@ -104,9 +110,12 @@ struct _GstAmlHalAsinkPrivate
 
   gboolean paused_;
   gboolean flushing_;
+
+#if 0
   //gboolean flushed_;
   gboolean tsync_enable_;
-  gboolean pcr_master_;
+#endif
+  gboolean sync_mode;
   gboolean received_eos;
   gboolean eos;
   guint32 seqnum; /* for eos */
@@ -131,6 +140,7 @@ struct _GstAmlHalAsinkPrivate
   guint wrapping_time;
   uint32_t last_pcr;
   uint32_t first_pts;
+  guint64  first_pts_64;
   gboolean first_pts_set;
 
   GstSegment segment;
@@ -141,6 +151,7 @@ struct _GstAmlHalAsinkPrivate
   /* tempo stretch */
   struct scale_tempo st;
   gboolean tempo_used;
+  float rate;
 
   /* pause pts */
   uint32_t pause_pts;
@@ -173,6 +184,19 @@ struct _GstAmlHalAsinkPrivate
   int     gap_state;
   int64_t gap_start_pts;
   int32_t gap_duration;
+
+  /* avsync */
+  void * avsync;
+  int session_id;
+  GstClock *provided_clock;
+  gboolean wait_video;
+};
+
+enum
+{
+  SYNC_AMASTER = 0,
+  SYNC_PCR_MASTER = 1,
+  SYNC_IPTV = 2,
 };
 
 enum
@@ -197,11 +221,13 @@ enum
   PROP_MASTER_VOLUME,
   PROP_STREAM_VOLUME,
   PROP_MUTE,
-  PROP_PCR_MASTER,
+  PROP_AVSYNC_MODE,
   PROP_PAUSE_PTS,
   PROP_DISABLE_XRUN_TIMER,
   PROP_GAP_START_PTS,
   PROP_GAP_DURATION,
+  PROP_AVSYNC_SESSION,
+  PROP_WAIT_FOR_VIDEO,
   PROP_LAST
 };
 
@@ -311,12 +337,14 @@ static gboolean hal_pause (GstAmlHalAsink * sink);
 static gboolean hal_stop (GstAmlHalAsink * sink);
 static guint hal_commit (GstAmlHalAsink * sink, guchar * data, gint size, guint64 pts_64);
 static uint32_t hal_get_latency (GstAmlHalAsink * sink);
-static int config_sys_node(const char* path, const char* value);
-static int get_sysfs_uint32(const char *path, uint32_t *value);
-static int tsync_enable (GstAmlHalAsink * sink, gboolean enable);
 static void dump(const char* path, const uint8_t *data, int size);
+#if 0
+static int get_sysfs_uint32(const char *path, uint32_t *value);
+static int config_sys_node(const char* path, const char* value);
+static int tsync_enable (GstAmlHalAsink * sink, gboolean enable);
 static int tsync_send_audio_event(const char* event);
 static int tsync_reset_pcr (GstAmlHalAsink * sink);
+#endif
 static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts);
 static void vol_ramp(guchar * data, gint size, int dir);
 
@@ -384,10 +412,10 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
-      PROP_PCR_MASTER,
-      g_param_spec_boolean ("pcr-master", "Enable PRC master avsync mode",
-          "Enable this mode for DVB/ATSC playback", FALSE,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      PROP_AVSYNC_MODE,
+      g_param_spec_uint ("avsync-mode", "Avsync mode",
+          "Set avsync mode 0 (amaster) 1 (pcr master) 2 (iptv)",
+          0, 2, 0, G_PARAM_READWRITE));
 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_PAUSE_PTS,
       g_param_spec_uint ("pause-pts", "pause pts",
@@ -408,6 +436,17 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       g_param_spec_boolean ("disable-xrun", "Disable underrun timer",
           "If the audio stream is not stable like in Mircast case, set it to prevent unexpected pause",
           FALSE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AVSYNC_SESSION,
+      g_param_spec_int ("avsync-session", "avsync session",
+        "avsync session id to link video and audio. If set, this sink won't create clock",
+        G_MININT, G_MAXINT, 0, G_PARAM_WRITABLE));
+
+  g_object_class_install_property (gobject_class,
+      PROP_WAIT_FOR_VIDEO,
+      g_param_spec_boolean ("wait-video", "Wait for video to start",
+          "Audio needs to align with video at starting point", FALSE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
@@ -466,16 +505,14 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
 #endif
 
   sink->priv = priv;
-  sink->provided_clock = gst_audio_clock_new ("GstAmlSinkClock",
-      (GstAudioClockGetTimeFunc) gst_aml_hal_asink_get_time, sink,
-      NULL);
-
   basesink = GST_BASE_SINK_CAST (sink);
   /* bypass sync control of basesink */
   gst_base_sink_set_sync(basesink, FALSE);
   gst_pad_set_event_function (basesink->sinkpad, gst_aml_hal_asink_pad_event);
   gst_pad_set_chain_function (basesink->sinkpad, gst_aml_hal_asink_chain);
 
+  priv->provided_clock = gst_aml_clock_new ("GstAmlSinkClock",
+          (GstAmlClockGetTimeFunc) gst_aml_hal_asink_get_time, sink, NULL);
   GST_OBJECT_FLAG_SET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
 
   priv->hw_dev_ = NULL;
@@ -487,6 +524,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->gap_start_pts = -1;
   priv->gap_duration = 0;
   priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
+  priv->session_id = -1;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
@@ -503,6 +541,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->rm = 0;
   priv->resAssignedId = -1;
 #endif
+  log_set_level(LOG_INFO);
 }
 
 static void
@@ -511,14 +550,17 @@ gst_aml_hal_asink_dispose (GObject * object)
   GstAmlHalAsink * sink = GST_AML_HAL_ASINK(object);
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
-  if (sink->provided_clock) {
+  GST_DEBUG_OBJECT (sink, "dispose");
+  if (priv->provided_clock) {
+#if 0
 #if GST_CHECK_VERSION(1,14,0)
     gst_audio_clock_invalidate (GST_AUDIO_CLOCK(sink->provided_clock));
 #else
     gst_audio_clock_invalidate (GST_CLOCK(sink->provided_clock));
 #endif
-    gst_object_unref (sink->provided_clock);
-    sink->provided_clock = NULL;
+#endif
+    gst_object_unref (priv->provided_clock);
+    priv->provided_clock = NULL;
   }
 
   g_mutex_clear (&priv->feed_lock);
@@ -531,10 +573,12 @@ static GstClock *
 gst_aml_hal_asink_provide_clock (GstElement * elem)
 {
   GstAmlHalAsink *sink = GST_AML_HAL_ASINK (elem);
-  GstClock *clock;
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  GstClock *clock = NULL;
 
   GST_OBJECT_LOCK (sink);
-  clock = GST_CLOCK_CAST (gst_object_ref (sink->provided_clock));
+  if (priv->provided_clock)
+      clock = GST_CLOCK_CAST (gst_object_ref (priv->provided_clock));
   GST_OBJECT_UNLOCK (sink);
 
   return clock;
@@ -543,17 +587,34 @@ gst_aml_hal_asink_provide_clock (GstElement * elem)
 static gboolean
 gst_aml_hal_asink_is_self_provided_clock (GstAmlHalAsink* sink)
 {
-  return (sink->provided_clock && GST_IS_AUDIO_CLOCK (sink->provided_clock) &&
-      GST_AUDIO_CLOCK_CAST (sink->provided_clock)->func ==
-      (GstAudioClockGetTimeFunc) gst_aml_hal_asink_get_time);
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  return (priv->provided_clock && GST_IS_AML_CLOCK (priv->provided_clock));
+}
+
+static int avsync_get_time(GstAmlHalAsink* sink, pts90K *pts)
+{
+    int rc = 0;
+    GstAmlHalAsinkPrivate *priv = sink->priv;
+
+    if (!priv->avsync) {
+        rc = -1;
+        goto exit;
+    }
+
+    rc = av_sync_get_clock(priv->avsync, pts);
+
+exit:
+    return rc;
 }
 
 static gboolean
 get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
-  uint32_t pcr = 0;
+  pts90K pcr = 0;
   gint64 timepassed_90k, timepassed;
+  int rc;
 
   if (priv->group_done) {
     *cur = GST_CLOCK_TIME_NONE;
@@ -572,12 +633,10 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     return FALSE;
   }
 
-  if (!priv->tsync_enable_) {
-    *cur = 0;
-    return TRUE;
-  }
+  rc = avsync_get_time(sink, &pcr);
+  if (rc)
+      return FALSE;
 
-  get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
   if (priv->last_pcr > 0xF0000000 && pcr < 10*PTS_90K) {
     priv->wrapping_time++;
     GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
@@ -590,7 +649,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     timepassed_90k = (int)(pcr - priv->first_pts) + (priv->wrapping_time-1)*0xFFFFFFFFLL;
 
   timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
-  *cur = priv->segment.start + timepassed;
+  *cur = priv->first_pts_64 + timepassed;
 
   GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
   if (GST_FORMAT_TIME != format) {
@@ -702,6 +761,7 @@ gst_aml_hal_asink_query (GstElement * element, GstQuery * query)
   return res;
 }
 
+#if 0
 static int get_sysfs_uint32(const char *path, uint32_t *value)
 {
     int fd;
@@ -725,6 +785,7 @@ static int get_sysfs_uint32(const char *path, uint32_t *value)
     *value = val;
     return 0;
 }
+#endif
 
 static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts)
 {
@@ -748,7 +809,8 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
 {
   GstClockTime result = GST_CLOCK_TIME_NONE;
   GstAmlHalAsinkPrivate *priv = sink->priv;
-  uint32_t pcr = 0;
+  pts90K pcr = 0;
+  int rc;
 
   if (priv->group_done) {
     /* return a little bigger time for basesink of other module
@@ -767,12 +829,10 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
     goto done;
   }
 
-  if (!priv->tsync_enable_) {
-    GST_TRACE_OBJECT(sink, "tsync disabled");
-    return result;
-  }
+  rc = avsync_get_time(sink, &pcr);
+  if (rc)
+      goto done;
 
-  get_sysfs_uint32(TSYNC_PCRSCR, &pcr);
   result = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
 
 done:
@@ -800,7 +860,7 @@ gst_aml_hal_sink_get_master_volume (GstAmlHalAsink * sink)
     GST_ERROR_OBJECT(sink, "get_master_volume fail: %d",ret);
     return vol;
   }
-  GST_DEBUG_OBJECT (sink, "master vol:%f", vol);
+  GST_LOG_OBJECT (sink, "master vol:%f", vol);
   return vol;
 }
 
@@ -895,9 +955,23 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
 
   switch (property_id) {
     case PROP_DIRECT_MODE:
+    {
       priv->direct_mode_ = g_value_get_boolean(value);
       GST_DEBUG_OBJECT (sink, "set direct mode:%d", priv->direct_mode_);
+      GST_OBJECT_LOCK (sink);
+      if (!priv->direct_mode_ && priv->provided_clock) {
+        GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
+        GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
+        GstElementClass *eclass = (GstElementClass *)class;
+
+        gst_object_unref (priv->provided_clock);
+        priv->provided_clock = NULL;
+        eclass->provide_clock = NULL;
+        GST_OBJECT_FLAG_UNSET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
+      }
+      GST_OBJECT_UNLOCK (sink);
       break;
+    }
     case PROP_TTS_MODE:
       priv->tts_mode_ = g_value_get_boolean(value);
       if (priv->tts_mode_)
@@ -923,9 +997,9 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     case PROP_MUTE:
       gst_aml_hal_sink_set_mute (sink, g_value_get_boolean (value));
       break;
-    case PROP_PCR_MASTER:
-      priv->pcr_master_ = g_value_get_boolean(value);
-      GST_DEBUG_OBJECT (sink, "pcr master mode:%d", priv->pcr_master_);
+    case PROP_AVSYNC_MODE:
+      priv->sync_mode = g_value_get_uint (value);
+      GST_DEBUG_OBJECT (sink, "sync mode:%d", priv->sync_mode);
       break;
     case PROP_PAUSE_PTS:
       priv->pause_pts = g_value_get_uint (value);
@@ -942,6 +1016,30 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     case PROP_GAP_DURATION:
       priv->gap_duration = g_value_get_int(value);
       GST_WARNING_OBJECT (sink, "gap duration %d", priv->gap_duration);
+      break;
+    case PROP_AVSYNC_SESSION:
+    {
+      int id = g_value_get_int (value);
+      if (id >= 0) {
+        GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
+        GstElementClass *eclass = (GstElementClass *)class;
+        GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
+
+        /* will not provide GstAmlClock, application should take care of the
+         * session */
+        priv->session_id = id;
+        eclass->provide_clock = NULL;
+
+        gst_object_unref (priv->provided_clock);
+        priv->provided_clock = NULL;
+        GST_OBJECT_FLAG_UNSET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
+        GST_WARNING_OBJECT (sink, "avsync session %u", priv->session_id);
+      }
+      break;
+    }
+    case PROP_WAIT_FOR_VIDEO:
+      priv->wait_video = g_value_get_boolean(value);
+      GST_WARNING_OBJECT (sink, "wait video:%d", priv->wait_video);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -978,11 +1076,17 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       priv->mute_ = gst_aml_hal_sink_get_mute(sink);
       g_value_set_boolean (value, priv->mute_);
       break;
-    case PROP_PCR_MASTER:
-      g_value_set_boolean (value, priv->pcr_master_);
+    case PROP_AVSYNC_MODE:
+      g_value_set_uint (value, priv->sync_mode);
       break;
     case PROP_PAUSE_PTS:
       g_value_set_uint (value, priv->pause_pts);
+      break;
+    case PROP_AVSYNC_SESSION:
+      g_value_set_int (value, priv->session_id);
+      break;
+    case PROP_WAIT_FOR_VIDEO:
+      g_value_set_boolean (value, priv->wait_video);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -1106,10 +1210,12 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
     gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume);
   }
 
+#if 0
   /* If we use our own clock, we need to adjust the offset since it will now
    * restart from zero */
   if (gst_aml_hal_asink_is_self_provided_clock (sink))
     gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
+#endif
 
   /* We need to resync since the ringbuffer restarted */
   gst_aml_hal_asink_reset_sync (sink);
@@ -1186,7 +1292,7 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink, GstClockTime time)
   if (G_UNLIKELY (!GST_CLOCK_TIME_IS_VALID (time)))
     goto invalid_time;
 
-  clock = sink->provided_clock;
+  clock = priv->provided_clock;
 
   GST_INFO_OBJECT (sink,
       "time %" GST_TIME_FORMAT , GST_TIME_ARGS (time));
@@ -1299,15 +1405,22 @@ gst_aml_hal_asink_wait_event (GstBaseSink * bsink, GstEvent * event)
   return ret;
 }
 
-static void update_pcr_speed(float rate)
+static int update_avsync_speed(GstAmlHalAsink *sink, float rate)
 {
-    int value = 1000000 * rate;
-    char value_str[20];
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  int rc = 0;
 
-    if (rate == 1.0f)
-      value = 1;
-    snprintf(value_str, 20, "%d", value);
-    config_sys_node("/sys/class/video/vsync_slow_factor", value_str);
+  if (rate == priv->rate)
+    return 0;
+
+  if (priv->avsync)
+    rc = av_sync_set_speed(priv->avsync, rate);
+
+  if (!rc)
+    priv->rate = rate;
+  else
+    GST_ERROR_OBJECT (sink, "rate %f fail", rate);
+  return rc;
 }
 
 static gboolean
@@ -1373,7 +1486,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         g_timer_stop(priv->xrun_timer);
         priv->xrun_paused = false;
       }
-      tsync_enable (sink, TRUE);
       GST_OBJECT_UNLOCK (sink);
 
       gst_aml_hal_asink_reset_sync (sink);
@@ -1418,12 +1530,27 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         priv->segment.rate = segment.rate;
       }
 
+      /* create avsync before rate change */
+      if (!priv->avsync && priv->direct_mode_) {
+        char setting[20];
+        priv->avsync = av_sync_create (priv->session_id, AV_SYNC_MODE_AMASTER, AV_SYNC_TYPE_AUDIO, 0);
+        if (!priv->avsync) {
+          GST_ERROR_OBJECT (sink, "create av sync fail");
+          break;
+        }
+        if (priv->wait_video)
+          avs_sync_set_start_policy (priv->avsync, AV_SYNC_START_ALIGN);
+        /* set session into hwsync id */
+        snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
+        priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+      }
+
       if (priv->tempo_used)
         scaletempo_update_segment (&priv->st, &priv->segment);
 
       if (priv->direct_mode_) {
-        update_pcr_speed(segment.rate);
-        GST_INFO_OBJECT (sink, "pcr rate to %f", segment.rate);
+        update_avsync_speed(sink, segment.rate);
+        GST_INFO_OBJECT (sink, "rate to %f", segment.rate);
       }
       break;
     }
@@ -1456,7 +1583,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       }
       GST_OBJECT_LOCK (sink);
       hal_stop (sink);
-      tsync_enable (sink, TRUE);
       priv->group_done = TRUE;
       priv->eos_end_time = priv->eos_time;
       GST_OBJECT_UNLOCK (sink);
@@ -1547,13 +1673,14 @@ static gpointer xrun_thread(gpointer para)
         continue;
       }
 
-      GST_INFO_OBJECT (sink, "xrun signal triggered");
+      GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+      hal_pause (sink);
       g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
       g_timer_start(priv->xrun_timer);
       g_timer_stop(priv->xrun_timer);
 #else
-      GST_INFO_OBJECT (sink, "xrun timer triggered pause tsync");
-      tsync_send_audio_event(AUDIO_PAUSE_EVENT);
+      GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+      hal_pause (sink);
       priv->xrun_paused = true;
       g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
 #endif
@@ -1776,9 +1903,9 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
 #ifdef ENABLE_XRUN_DETECTION
   GST_OBJECT_LOCK (sink);
-  if (!priv->pcr_master_ && priv->stream_ &&
-      !priv->xrun_thread && !priv->disable_xrun &&
-      start_xrun_thread (sink)) {
+  if (priv->sync_mode == SYNC_AMASTER &&
+        priv->stream_ && !priv->xrun_thread &&
+        !priv->disable_xrun && start_xrun_thread (sink)) {
     ret = GST_FLOW_ERROR;
     GST_OBJECT_UNLOCK (sink);
     goto done;
@@ -1842,14 +1969,6 @@ gst_aml_hal_asink_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
 static void paused_to_ready(GstAmlHalAsink *sink)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
-
-  /* Only post clock-lost messages if this is the clock that
-   * we've created. If the subclass has overriden it the subclass
-   * should post this messages whenever necessary */
-  if (gst_aml_hal_asink_is_self_provided_clock (sink))
-    gst_element_post_message (GST_ELEMENT_CAST(sink),
-        gst_message_new_clock_lost (GST_OBJECT_CAST (sink),
-          sink->provided_clock));
 
   /* make sure we unblock before calling the parent state change
    * so it can grab the STREAM_LOCK */
@@ -1951,7 +2070,13 @@ gst_aml_hal_asink_change_state (GstElement * element,
       if (priv->direct_mode_)
         essos_rm_init (sink);
 #endif
+#if 0
       gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
+#endif
+
+      if (priv->provided_clock)
+        priv->session_id = gst_aml_clock_get_session_id(priv->provided_clock);
+      GST_WARNING_OBJECT(sink, "avsync session %d", priv->session_id);
 
       if (!gst_aml_hal_asink_open (sink)) {
         GST_ERROR_OBJECT(sink, "asink open failure");
@@ -1974,8 +2099,10 @@ gst_aml_hal_asink_change_state (GstElement * element,
     case GST_STATE_CHANGE_READY_TO_PAUSED:
       GST_INFO_OBJECT(sink, "ready to paused");
       gst_base_sink_set_async_enabled (GST_BASE_SINK_CAST(sink), FALSE);
+#if 0
       if (priv->direct_mode_)
         tsync_reset_pcr (sink);
+#endif
       gst_aml_hal_asink_reset_sync (sink);
       /* start in paused state until PLAYING */
       priv->paused_ = TRUE;
@@ -1987,7 +2114,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
       if (gst_aml_hal_asink_is_self_provided_clock (sink))
         gst_element_post_message (element,
             gst_message_new_clock_provide (GST_OBJECT_CAST (element),
-              sink->provided_clock, TRUE));
+              priv->provided_clock, TRUE));
       break;
     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
     {
@@ -2030,7 +2157,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
     {
       GST_INFO_OBJECT(sink, "paused to ready");
       paused_to_ready (sink);
-
       break;
     }
     default:
@@ -2041,8 +2167,10 @@ gst_aml_hal_asink_change_state (GstElement * element,
 
   switch (transition) {
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+#if 0
       /* stop slaving ourselves to the master, if any */
       gst_clock_set_master (sink->provided_clock, NULL);
+#endif
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:
       GST_INFO_OBJECT(sink, "ready to null");
@@ -2062,7 +2190,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
 #endif
       gst_aml_hal_asink_close (sink);
       GST_OBJECT_UNLOCK (sink);
-
       break;
     default:
       break;
@@ -2165,9 +2292,11 @@ static gboolean hal_close_device (GstAmlHalAsink* sink)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GST_LOG_OBJECT (sink, "closing device");
 
-  if (priv->stream_)
+  if (priv->stream_) {
+    priv->stream_->flush(priv->stream_);
     priv->hw_dev_->close_output_stream(priv->hw_dev_,
         priv->stream_);
+  }
 
   if (priv->trans_buf)
     g_free(priv->trans_buf);
@@ -2322,6 +2451,7 @@ static gboolean hal_release (GstAmlHalAsink * sink)
   return TRUE;
 }
 
+#if 0
 static int config_sys_node(const char* path, const char* value)
 {
   int fd;
@@ -2385,6 +2515,7 @@ static int tsync_enable (GstAmlHalAsink * sink, gboolean enable)
   }
   return 0;
 }
+#endif
 
 #define HAL_WRONG_STAT 3
 static gboolean hal_start (GstAmlHalAsink * sink)
@@ -2396,8 +2527,10 @@ static gboolean hal_start (GstAmlHalAsink * sink)
     GST_INFO_OBJECT (sink, "stream not created yet");
     priv->paused_ = FALSE;
   } else {
+#if 0
     if (priv->direct_mode_)
       tsync_send_audio_event(AUDIO_RESUME_EVENT);
+#endif
     g_mutex_lock(&priv->feed_lock);
     if (priv->paused_) {
       int ret;
@@ -2407,13 +2540,15 @@ static gboolean hal_start (GstAmlHalAsink * sink)
         GST_WARNING_OBJECT (sink, "resume failure:%d", ret);
 
       GST_DEBUG_OBJECT (sink, "resume");
+
+      if (priv->xrun_timer)
+        g_timer_start(priv->xrun_timer);
       priv->paused_ = FALSE;
       g_cond_signal (&priv->run_ready);
     }
     g_mutex_unlock(&priv->feed_lock);
   }
 
-  tsync_enable (sink, TRUE);
   return TRUE;
 }
 
@@ -2428,8 +2563,10 @@ static gboolean hal_pause (GstAmlHalAsink * sink)
     return FALSE;
   }
 
+#if 0
   if (priv->direct_mode_)
     tsync_send_audio_event(AUDIO_PAUSE_EVENT);
+#endif
   g_mutex_lock(&priv->feed_lock);
   if (priv->paused_) {
     g_mutex_unlock(&priv->feed_lock);
@@ -2470,8 +2607,13 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
   priv->flushing_ = TRUE;
   g_cond_signal (&priv->run_ready);
   g_mutex_unlock (&priv->feed_lock);
-  tsync_enable (sink, FALSE);
   GST_DEBUG_OBJECT (sink, "stop");
+
+  if (priv->avsync) {
+    av_sync_destroy (priv->avsync);
+    priv->avsync = NULL;
+  }
+
   return TRUE;
 }
 
@@ -2834,13 +2976,18 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
 
       if (!priv->first_pts_set) {
          priv->first_pts_set = TRUE;
-         if (priv->segment.start)
+         if (priv->segment.start) {
            priv->first_pts = pts_32;
-         else
+           priv->first_pts_64 = pts_64;
+         } else {
            priv->first_pts = 0;
+           priv->first_pts_64 = 0;
+         }
          GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
+#if 0
          if (!priv->pcr_master_)
            tsync_set_first_apts(priv->first_pts);
+#endif
       }
       if (priv->diag_log_enable)
         diag_print (sink, pts_32);
@@ -2914,6 +3061,11 @@ static uint32_t hal_get_latency (GstAmlHalAsink * sink)
 
   GST_DEBUG_OBJECT (sink, "latency %u", latency);
   return latency;
+}
+
+GstClock *gst_aml_hal_asink_get_clock (GstElement *element)
+{
+  return gst_aml_hal_asink_provide_clock (element);
 }
 
 static gboolean

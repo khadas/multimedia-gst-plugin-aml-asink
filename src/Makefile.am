@@ -14,13 +14,18 @@ plugin_LTLIBRARIES = libgstamlhalasink.la
 ##############################################################################
 
 # sources used to compile this plug-in
-libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c ac4_frame_parse.c scaletempo.c
+libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c \
+			       ac4_frame_parse.h \
+			       ac4_frame_parse.c \
+			       scaletempo.h \
+			       scaletempo.c \
+			       gstamlclock.c
 
 # compiler and linker flags used to compile this plugin, set in configure.ac
 libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS)
 libgstamlhalasink_la_LIBADD = $(GST_LIBS)
 libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
-libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client
+libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
 
 if XRUN
@@ -38,3 +43,4 @@ endif
 
 # headers we need but don't want installed
 #noinst_HEADERS = 
+include_HEADERS = gstamlclock.h gstamlhalasink_new.h
