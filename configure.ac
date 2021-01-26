@@ -86,6 +86,15 @@ AC_ARG_ENABLE([xrun-detection],
 esac],[xrun-detection=false])
 AM_CONDITIONAL([XRUN], [test x$xrun = xtrue])
 
+AC_ARG_ENABLE([ms12],
+[  --enable-ms12 audio HAL is using ms12],
+[case "${enableval}" in
+  yes) ms12=true ;;
+  no)  ms12=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-ms12]) ;;
+esac],[ms12=false])
+AM_CONDITIONAL([MS12], [test x${ms12} = xtrue])
+
 dnl set proper LDFLAGS for plugins
 GST_PLUGIN_LDFLAGS='-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\).*'
 AC_SUBST(GST_PLUGIN_LDFLAGS)

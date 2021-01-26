@@ -27,5 +27,9 @@ if XRUN
 libgstamlhalasink_la_CFLAGS += -DENABLE_XRUN_DETECTION
 endif
 
+if MS12
+libgstamlhalasink_la_CFLAGS += -DENABLE_MS12
+endif
+
 # headers we need but don't want installed
 #noinst_HEADERS = 

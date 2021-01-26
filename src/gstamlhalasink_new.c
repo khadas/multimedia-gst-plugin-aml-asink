@@ -30,6 +30,7 @@
 #include <pthread.h>
 #include <math.h>
 #include <gst/audio/audio.h>
+#include <stdlib.h>
 #include <audio_if_client.h>
 #include "gstamlhalasink_new.h"
 #include "ac4_frame_parse.h"
@@ -167,6 +168,7 @@ enum
 enum
 {
   SIGNAL_PAUSEPTS,
+  SIGNAL_XRUN,
   MAX_SIGNAL
 };
 
@@ -347,6 +349,18 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
         0, G_MAXUINT, 0, G_PARAM_WRITABLE));
 
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
+      G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
+      (GSignalFlags) (G_SIGNAL_RUN_LAST),
+      0,    /* class offset */
+      NULL, /* accumulator */
+      NULL, /* accu data */
+      g_cclosure_marshal_VOID__UINT_POINTER,
+      G_TYPE_NONE,
+      2,
+      G_TYPE_UINT,
+      G_TYPE_POINTER);
+
+  g_signals[SIGNAL_XRUN]= g_signal_new( "underrun-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
       (GSignalFlags) (G_SIGNAL_RUN_LAST),
       0,    /* class offset */
@@ -1413,9 +1427,31 @@ static gpointer xrun_thread(gpointer para)
     /* cobalt cert requires pause avsync to stop video rendering */
     if (!priv->xrun_paused &&
            g_timer_elapsed(priv->xrun_timer, NULL) > 0.5) {
+#ifdef ENABLE_MS12
+      char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
+              "main_input_underrun");
+      int underrun = 0;
+
+      if (status) {
+        sscanf(status,"main_input_underrun=%d", &underrun);
+        free (status);
+      }
+
+      if (!underrun) {
+        usleep(10000);
+        continue;
+      }
+
+      GST_INFO_OBJECT (sink, "xrun signal triggered");
+      g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+      g_timer_start(priv->xrun_timer);
+      g_timer_stop(priv->xrun_timer);
+#else
       GST_INFO_OBJECT (sink, "xrun timer triggered pause tsync");
       tsync_send_audio_event(AUDIO_PAUSE_EVENT);
       priv->xrun_paused = true;
+      g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+#endif
     }
     usleep(50000);
   }
@@ -1742,7 +1778,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
       priv->quit_clock_wait = TRUE;
 
       gst_aml_hal_asink_reset_sync (sink);
-      stop_xrun_thread (sink);
       GST_OBJECT_UNLOCK (sink);
       break;
     default:
@@ -2003,6 +2038,7 @@ static gboolean hal_release (GstAmlHalAsink * sink)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GST_INFO_OBJECT (sink, "enter");
 
+  stop_xrun_thread (sink);
   hal_stop(sink);
   g_mutex_lock(&priv->feed_lock);
   if (priv->stream_) {
