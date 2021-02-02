@@ -470,7 +470,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   }
 
   if (!priv->render_samples) {
-    *cur = 0;
+    *cur = GST_CLOCK_TIME_NONE;
     return TRUE;
   }
 
