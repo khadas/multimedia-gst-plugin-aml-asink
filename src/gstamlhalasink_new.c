@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <math.h>
 #include <gst/audio/audio.h>
@@ -35,6 +36,10 @@
 #include "gstamlhalasink_new.h"
 #include "ac4_frame_parse.h"
 #include "scaletempo.h"
+
+#ifdef ESSOS_RM
+#include "essos-resmgr.h"
+#endif
 
 GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_CAT_DEFAULT gst_aml_hal_asink_debug_category
@@ -150,6 +155,11 @@ struct _GstAmlHalAsinkPrivate
   gboolean quit_xrun_thread;
   GTimer *xrun_timer;
   gboolean xrun_paused;
+
+#ifdef ESSOS_RM
+  EssRMgr *rm;
+  int resAssignedId;
+#endif
 };
 
 enum
@@ -426,6 +436,11 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
+
+#ifdef ESSOS_RM
+  priv->rm = 0;
+  priv->resAssignedId = -1;
+#endif
 }
 
 static void
@@ -1674,6 +1689,97 @@ gst_aml_hal_asink_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
   return gst_aml_hal_asink_render (sink, buf);
 }
 
+static void paused_to_ready(GstAmlHalAsink *sink)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  /* Only post clock-lost messages if this is the clock that
+   * we've created. If the subclass has overriden it the subclass
+   * should post this messages whenever necessary */
+  if (gst_aml_hal_asink_is_self_provided_clock (sink))
+    gst_element_post_message (GST_ELEMENT_CAST(sink),
+        gst_message_new_clock_lost (GST_OBJECT_CAST (sink),
+          sink->provided_clock));
+
+  /* make sure we unblock before calling the parent state change
+   * so it can grab the STREAM_LOCK */
+  GST_OBJECT_LOCK (sink);
+  hal_release (sink);
+  priv->quit_clock_wait = TRUE;
+
+  gst_aml_hal_asink_reset_sync (sink);
+  GST_OBJECT_UNLOCK (sink);
+}
+
+#ifdef ESSOS_RM
+static void resMgrNotify(EssRMgr *rm, int event, int type, int id, void* userData)
+{
+  GstAmlHalAsink *sink = (GstAmlHalAsink*)userData;
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  GST_WARNING_OBJECT (sink, "resMgrNotify: enter");
+  switch (type) {
+    case EssRMgrResType_audioDecoder:
+    {
+      switch (event) {
+        case EssRMgrEvent_revoked:
+        {
+          GST_WARNING_OBJECT (sink, "releasing audio decoder %d", id);
+          paused_to_ready (sink);
+
+          GST_OBJECT_LOCK (sink);
+          EssRMgrReleaseResource (priv->rm, EssRMgrResType_audioDecoder, id);
+          priv->resAssignedId = -1;
+          GST_OBJECT_UNLOCK (sink);
+
+          GST_DEBUG_OBJECT (sink, "done releasing audio decoder %d", id);
+          break;
+        }
+        default:
+        break;
+      }
+    }
+    case EssRMgrEvent_granted:
+    default:
+      break;
+  }
+  GST_WARNING_OBJECT (sink, "resMgrNotify: exit");
+}
+
+static void essos_rm_init(GstAmlHalAsink *sink)
+{
+  bool result;
+  EssRMgrRequest resReq;
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  const char *env = getenv("AMLASINK_USE_ESSRMGR");
+
+  if (env && !atoi(env))
+    return;
+
+  priv->rm = EssRMgrCreate();
+  if (!priv->rm) {
+    GST_ERROR_OBJECT (sink, "fail");
+    return;
+  }
+
+  resReq.type = EssRMgrResType_audioDecoder;
+  resReq.usage = EssRMgrAudUse_none;
+  resReq.priority = 0;
+  resReq.asyncEnable = false;
+  resReq.notifyCB = resMgrNotify;
+  resReq.notifyUserData = sink;
+  resReq.assignedId = -1;
+
+  result = EssRMgrRequestResource (priv->rm, EssRMgrResType_audioDecoder, &resReq);
+  if (result) {
+    if (resReq.assignedId >= 0) {
+      GST_DEBUG_OBJECT (sink, "assigned id %d caps %X", resReq.assignedId, resReq.assignedCaps);
+      priv->resAssignedId = resReq.assignedId;
+    }
+  }
+}
+#endif
+
 static GstStateChangeReturn
 gst_aml_hal_asink_change_state (GstElement * element,
     GstStateChange transition)
@@ -1686,6 +1792,9 @@ gst_aml_hal_asink_change_state (GstElement * element,
     case GST_STATE_CHANGE_NULL_TO_READY:
     {
       GST_INFO_OBJECT(sink, "null to ready");
+#ifdef ESSOS_RM
+      essos_rm_init (sink);
+#endif
       gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
 
       if (!gst_aml_hal_asink_open (sink)) {
@@ -1762,24 +1871,25 @@ gst_aml_hal_asink_change_state (GstElement * element,
       break;
     }
     case GST_STATE_CHANGE_PAUSED_TO_READY:
+    {
       GST_INFO_OBJECT(sink, "paused to ready");
-      /* Only post clock-lost messages if this is the clock that
-       * we've created. If the subclass has overriden it the subclass
-       * should post this messages whenever necessary */
-      if (gst_aml_hal_asink_is_self_provided_clock (sink))
-        gst_element_post_message (element,
-            gst_message_new_clock_lost (GST_OBJECT_CAST (element),
-              sink->provided_clock));
+      paused_to_ready (sink);
 
-      /* make sure we unblock before calling the parent state change
-       * so it can grab the STREAM_LOCK */
+#ifdef ESSOS_RM
       GST_OBJECT_LOCK (sink);
-      hal_release (sink);
-      priv->quit_clock_wait = TRUE;
-
-      gst_aml_hal_asink_reset_sync (sink);
+      if (priv->rm) {
+         if (priv->resAssignedId >= 0) {
+            EssRMgrReleaseResource (priv->rm,
+                EssRMgrResType_audioDecoder, priv->resAssignedId);
+            priv->resAssignedId = -1;
+         }
+         EssRMgrDestroy (priv->rm);
+         priv->rm = 0;
+      }
       GST_OBJECT_UNLOCK (sink);
+#endif
       break;
+    }
     default:
       break;
   }

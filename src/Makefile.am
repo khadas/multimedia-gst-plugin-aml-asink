@@ -31,5 +31,10 @@ if MS12
 libgstamlhalasink_la_CFLAGS += -DENABLE_MS12
 endif
 
+if ESSOS
+libgstamlhalasink_la_CFLAGS += -DESSOS_RM
+libgstamlhalasink_la_LIBADD += -lessosrmgr
+endif
+
 # headers we need but don't want installed
 #noinst_HEADERS = 

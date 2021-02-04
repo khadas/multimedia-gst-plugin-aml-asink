@@ -95,6 +95,15 @@ AC_ARG_ENABLE([ms12],
 esac],[ms12=false])
 AM_CONDITIONAL([MS12], [test x${ms12} = xtrue])
 
+AC_ARG_ENABLE([essos-rm],
+[  --enable-essos-rm Use essos for resource managing],
+[case "${enableval}" in
+  yes) essos=true ;;
+  no)  essos=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-essos-rm]) ;;
+esac],[essos=false])
+AM_CONDITIONAL([ESSOS], [test x${essos} = xtrue])
+
 dnl set proper LDFLAGS for plugins
 GST_PLUGIN_LDFLAGS='-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\).*'
 AC_SUBST(GST_PLUGIN_LDFLAGS)
