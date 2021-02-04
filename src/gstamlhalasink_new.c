@@ -46,7 +46,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define DEFAULT_VOLUME          1.0
 #define MAX_VOLUME              1.0
 
-#define MAX_TRANS_BUF_SIZE     0x8040
+#define MAX_TRANS_BUF_SIZE     0x6000
 #define TRANS_DATA_OFFSET      0x40
 //32KB
 #define TRANS_DATA_SIZE        (MAX_TRANS_BUF_SIZE - TRANS_DATA_OFFSET)
@@ -2499,8 +2499,14 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
         hw_sync = (struct hw_sync_header_v2 *)priv->trans_buf;
 
         if (cur_size > MAX_TRANS_BUF_SIZE - hw_header_s) {
-          GST_ERROR_OBJECT(sink, "frame too big %d", cur_size);
-          return offset;
+          if (raw_data) {
+            /* truncate and alight to 16B */
+            cur_size = MAX_TRANS_BUF_SIZE - hw_header_s;
+            cur_size &= 0xFFFFFFF0;
+          } else {
+            GST_ERROR_OBJECT(sink, "frame too big %d", cur_size);
+            return offset;
+          }
         }
         memcpy(priv->trans_buf + sizeof (*hw_sync),
           data, cur_size);
@@ -2558,9 +2564,17 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
 
     /* update PTS for next sample */
     if (priv->direct_mode_) {
-      if (priv->sr_)
-        pts_inc = gst_util_uint64_scale_int (priv->sample_per_frame, GST_SECOND, priv->sr_);
-      else
+      if (priv->sr_) {
+        if (raw_data) {
+          gint bpf = GST_AUDIO_INFO_BPF (&priv->spec.info);
+
+          if (bpf)
+            pts_inc = gst_util_uint64_scale_int (written/bpf,
+                GST_SECOND, priv->sr_);
+        } else
+          pts_inc = gst_util_uint64_scale_int (priv->sample_per_frame,
+              GST_SECOND, priv->sr_);
+      } else
         GST_WARNING_OBJECT (sink, "invalid sample rate %d",  priv->sr_);
       pts_64 += pts_inc;
     }
