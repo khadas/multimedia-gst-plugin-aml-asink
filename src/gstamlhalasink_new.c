@@ -1208,6 +1208,8 @@ static void update_pcr_speed(float rate)
     int value = 1000000 * rate;
     char value_str[20];
 
+    if (rate == 1.0f)
+      value = 1;
     snprintf(value_str, 20, "%d", value);
     config_sys_node("/sys/class/video/vsync_slow_factor", value_str);
 }
