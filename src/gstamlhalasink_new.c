@@ -1877,19 +1877,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
       GST_INFO_OBJECT(sink, "paused to ready");
       paused_to_ready (sink);
 
-#ifdef ESSOS_RM
-      GST_OBJECT_LOCK (sink);
-      if (priv->rm) {
-         if (priv->resAssignedId >= 0) {
-            EssRMgrReleaseResource (priv->rm,
-                EssRMgrResType_audioDecoder, priv->resAssignedId);
-            priv->resAssignedId = -1;
-         }
-         EssRMgrDestroy (priv->rm);
-         priv->rm = 0;
-      }
-      GST_OBJECT_UNLOCK (sink);
-#endif
       break;
     }
     default:
@@ -1907,6 +1894,18 @@ gst_aml_hal_asink_change_state (GstElement * element,
       GST_INFO_OBJECT(sink, "ready to null");
       GST_OBJECT_LOCK (sink);
       hal_close_device (sink);
+
+#ifdef ESSOS_RM
+      if (priv->rm) {
+         if (priv->resAssignedId >= 0) {
+            EssRMgrReleaseResource (priv->rm,
+                EssRMgrResType_audioDecoder, priv->resAssignedId);
+            priv->resAssignedId = -1;
+         }
+         EssRMgrDestroy (priv->rm);
+         priv->rm = 0;
+      }
+#endif
       GST_OBJECT_UNLOCK (sink);
 
       gst_aml_hal_asink_close (sink);
