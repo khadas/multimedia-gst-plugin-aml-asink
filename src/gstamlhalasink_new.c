@@ -725,12 +725,15 @@ gst_aml_hal_sink_get_master_volume (GstAmlHalAsink * sink)
   int ret;
   float vol = 0.0;
 
+  GST_OBJECT_LOCK (sink);
   if (!priv->hw_dev_) {
+    GST_OBJECT_UNLOCK (sink);
     GST_ERROR_OBJECT(sink, "audio HAL not open yet");
     return vol;
   }
 
   ret = priv->hw_dev_->get_master_volume(priv->hw_dev_, &vol);
+  GST_OBJECT_UNLOCK (sink);
   if (ret) {
     GST_ERROR_OBJECT(sink, "get_master_volume fail: %d",ret);
     return vol;
@@ -745,7 +748,9 @@ gst_aml_hal_sink_set_master_volume (GstAmlHalAsink * sink, float vol)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   int ret;
 
+  GST_OBJECT_LOCK (sink);
   if (!priv->hw_dev_) {
+    GST_OBJECT_UNLOCK (sink);
     GST_WARNING_OBJECT(sink, "audio HAL not open yet, delayed");
     priv->master_volume_pending = TRUE;
     priv->master_volume = vol;
@@ -753,6 +758,7 @@ gst_aml_hal_sink_set_master_volume (GstAmlHalAsink * sink, float vol)
   }
 
   ret = priv->hw_dev_->set_master_volume (priv->hw_dev_, vol);
+  GST_OBJECT_UNLOCK (sink);
   if (ret)
     GST_ERROR_OBJECT(sink, "set_master_volume fail %d", ret);
   else
@@ -1906,9 +1912,8 @@ gst_aml_hal_asink_change_state (GstElement * element,
          priv->rm = 0;
       }
 #endif
-      GST_OBJECT_UNLOCK (sink);
-
       gst_aml_hal_asink_close (sink);
+      GST_OBJECT_UNLOCK (sink);
 
       break;
     default:
@@ -1983,6 +1988,7 @@ static gboolean gst_aml_hal_asink_close (GstAmlHalAsink* sink)
     GST_DEBUG_OBJECT(sink, "patch destroyed");
   }
   audio_hw_unload_interface(priv->hw_dev_);
+  priv->hw_dev_ = NULL;
   GST_DEBUG_OBJECT(sink, "unload hw");
   return TRUE;
 }
