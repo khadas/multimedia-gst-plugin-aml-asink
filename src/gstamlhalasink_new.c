@@ -938,7 +938,7 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
 
     gst_structure_get_int (structure, "channels", &info.channels);
     spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_AC3;
-    info.bpf = 4;
+    info.bpf = 1;
   } else if (g_str_equal (mimetype, "audio/x-ac4")) {
     spec->type = GST_AUDIO_FORMAT_TYPE_AC4;
     /* to pass the sanity check in render() */
@@ -1684,6 +1684,13 @@ wrong_size:
     GST_ERROR_OBJECT (sink, "wrong size %d/%d", size, bpf);
     GST_ELEMENT_ERROR (sink, STREAM, WRONG_TYPE,
         (NULL), ("sink received buffer of wrong size."));
+#ifdef DUMP_TO_FILE
+    gst_buffer_map (buf, &info, GST_MAP_READ);
+    data = info.data;
+    size = info.size;
+    dump ("/tmp/asink_", data, size);
+    gst_buffer_unmap (buf, &info);
+#endif
     ret = GST_FLOW_ERROR;
     goto done;
   }
