@@ -2059,12 +2059,14 @@ hal_parse_spec (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
   priv->sr_ = GST_AUDIO_INFO_RATE (&spec->info);
   channels = GST_AUDIO_INFO_CHANNELS (&spec->info);
 
-  if (!priv->direct_mode_ && channels != 2) {
+  if (!priv->direct_mode_ && channels != 2 && channels != 1) {
     GST_ERROR_OBJECT (sink, "unsupported channel number:%d", channels);
     goto error;
   }
 
-  if (channels == 2)
+  if (channels == 1)
+    priv->channel_mask_ = AUDIO_CHANNEL_OUT_MONO;
+  else if (channels == 2)
     priv->channel_mask_ = AUDIO_CHANNEL_OUT_STEREO;
   else if (channels == 6)
     priv->channel_mask_ = AUDIO_CHANNEL_OUT_5POINT1;
