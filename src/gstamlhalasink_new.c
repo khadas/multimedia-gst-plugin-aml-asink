@@ -2569,6 +2569,9 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
       //dump("/tmp/err.dat", data, towrite);
       return 0;
     }
+  } else if (priv->format_ == AUDIO_FORMAT_AC4) {
+    /* parse sync frame */
+    parse_bit_stream(sink, data, towrite);
   }
 
   /* notify EOS */
