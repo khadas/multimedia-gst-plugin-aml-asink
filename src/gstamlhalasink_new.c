@@ -81,6 +81,7 @@ struct _GstAmlHalAsinkPrivate
   audio_hw_device_t *hw_dev_;
   uint32_t output_port_;
   uint32_t direct_mode_;
+  gboolean tts_mode_;
   /* current cap */
   GstAudioRingBufferSpec spec;
 
@@ -166,6 +167,7 @@ enum
 {
   PROP_0,
   PROP_DIRECT_MODE,
+  PROP_TTS_MODE,
   PROP_OUTPUT_PORT,
   PROP_MASTER_VOLUME,
   PROP_STREAM_VOLUME,
@@ -327,6 +329,11 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   g_object_class_install_property (gobject_class, PROP_DIRECT_MODE,
       g_param_spec_boolean ("direct-mode", "Direct Mode",
           "Select this mode for main mixing port, unselect it for system sound mixing port",
+          TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_TTS_MODE,
+      g_param_spec_boolean ("tts-mode", "TTS Mode",
+          "Select this mode for text to speech, this mode doesnt have AV sync control",
           TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
@@ -836,6 +843,12 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->direct_mode_ = g_value_get_boolean(value);
       GST_DEBUG_OBJECT (sink, "set direct mode:%d", priv->direct_mode_);
       break;
+    case PROP_TTS_MODE:
+      priv->tts_mode_ = g_value_get_boolean(value);
+      if (priv->tts_mode_)
+        priv->direct_mode_ = false;
+      GST_WARNING_OBJECT (sink, "set tts mode:%d", priv->tts_mode_);
+      break;
     case PROP_OUTPUT_PORT:
       priv->output_port_ = g_value_get_enum (value);
       GST_DEBUG_OBJECT (sink, "set output port:%d", priv->output_port_);
@@ -879,6 +892,10 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
     case PROP_DIRECT_MODE:
       g_value_set_boolean(value, priv->direct_mode_);
       GST_DEBUG_OBJECT (sink, "get direct mode:%d", priv->direct_mode_);
+      break;
+    case PROP_TTS_MODE:
+      g_value_set_boolean(value, priv->tts_mode_);
+      GST_DEBUG_OBJECT (sink, "get tts mode:%d", priv->tts_mode_);
       break;
     case PROP_OUTPUT_PORT:
       g_value_set_enum(value, priv->output_port_);
@@ -2112,7 +2129,9 @@ aml_open_output_stream (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
   config.channel_mask = priv->channel_mask_;
   config.format = priv->format_;
 
-  if (priv->direct_mode_)
+  if (priv->tts_mode_)
+    flag = AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_PRIMARY;
+  else if (priv->direct_mode_)
     flag = AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_HW_AV_SYNC;
   else
     flag = AUDIO_OUTPUT_FLAG_PRIMARY;
