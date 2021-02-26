@@ -1645,9 +1645,6 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     GST_OBJECT_UNLOCK (sink);
     goto done;
   }
-
-  if (priv->xrun_timer)
-    g_timer_start(priv->xrun_timer);
   GST_OBJECT_UNLOCK (sink);
 #endif
 
@@ -2707,6 +2704,9 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
         GST_WARNING_OBJECT (sink, "invalid sample rate %d",  priv->sr_);
       pts_64 += pts_inc;
     }
+
+    if (priv->xrun_timer)
+      g_timer_start(priv->xrun_timer);
 
     GST_LOG_OBJECT (sink,
         "write %d/%d left %d ts: %llu", written, cur_size, towrite, pts_64);
