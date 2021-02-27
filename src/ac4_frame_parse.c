@@ -82,7 +82,7 @@ static uint16_t read_bit(int32_t start, int32_t len, uint8_t* data, int32_t data
 int ac4_toc_parse (uint8_t* data, int32_t len, struct ac4_info* info)
 {
     int32_t bit_off = 0;
-    uint8_t bitstream_version;
+    //uint8_t bitstream_version;
     uint16_t sequence_count;
     uint8_t b_wait_frames;
     uint8_t wait_frames;
@@ -112,6 +112,10 @@ int ac4_toc_parse (uint8_t* data, int32_t len, struct ac4_info* info)
         info->sync_frame = 0;
     }
 
+    /* AV-Sync_321_AC4_H265_MP4_24fps.mp4 contains version 2, which
+     * doesn't conform to ETSI TS 103 190-1 V1.3.1 4.3.3.2.1
+     * So skip this sanity check for now */
+#if 0
     /* raw ac4 frame 4.2.1 */
     bitstream_version = read_bit(bit_off, 2, data, len);
     if (bitstream_version != 0 && bitstream_version != 1) {
@@ -119,6 +123,7 @@ int ac4_toc_parse (uint8_t* data, int32_t len, struct ac4_info* info)
             __func__, __LINE__, bitstream_version);
         //return -1;
     }
+#endif
     bit_off += 2;
 
     sequence_count = read_bit(bit_off, 10, data, len);
