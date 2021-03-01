@@ -2539,7 +2539,6 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
   guint towrite;
   gboolean raw_data;
   guint offset = 0;
-  guint parsed = 0;
   guint hw_header_s = sizeof (struct hw_sync_header_v2);
 
   if (!priv->stream_) {
@@ -2553,20 +2552,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
   if (towrite)
     dump ("/data/asink_", data, towrite);
 
-  /* Frame aligned */
-  /* AC4 has constant bit rate (CBR) and variable bit reate(VBR) streams
-   * And VBR doesn't have to be encoded size aligned
-   */
-  if (towrite && !raw_data && priv->format_ != AUDIO_FORMAT_AC4) {
-    while (!parse_bit_stream(sink, data + parsed, towrite - parsed)
-            && parsed < towrite)
-      parsed += priv->encoded_size;
-    if (parsed != towrite) {
-      GST_ERROR_OBJECT(sink, "not frame aligned %d %d", towrite, priv->encoded_size);
-      //dump("/tmp/err.dat", data, towrite);
-      return 0;
-    }
-  } else if (priv->format_ == AUDIO_FORMAT_AC4) {
+  if (priv->format_ == AUDIO_FORMAT_AC4) {
     /* parse sync frame */
     parse_bit_stream(sink, data, towrite);
   }
@@ -2591,9 +2577,16 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     uint64_t pts_inc = 0;
     guchar * trans_data = NULL;
 
-    if (!raw_data && priv->format_ != AUDIO_FORMAT_AC4)
+    if (!raw_data && priv->format_ != AUDIO_FORMAT_AC4) {
+      /* Frame aligned, AC4 has constant bit rate (CBR) and variable bit reate(VBR) streams
+       * And VBR doesn't have to be encoded size aligned
+       */
+      if (parse_bit_stream(sink, data, towrite) < 0 || towrite < priv->encoded_size) {
+        GST_WARNING_OBJECT (sink, "stream not frame aligned left %d discarded", towrite);
+        return size;
+      }
       cur_size = priv->encoded_size;
-    else
+    } else
       cur_size = towrite;
 
     if (priv->format_ == AUDIO_FORMAT_AC4 && !priv->sync_frame) {
