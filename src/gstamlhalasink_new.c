@@ -1805,7 +1805,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
     {
       GST_INFO_OBJECT(sink, "null to ready");
 #ifdef ESSOS_RM
-      if (!priv->direct_mode_)
+      if (priv->direct_mode_)
         essos_rm_init (sink);
 #endif
       gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
