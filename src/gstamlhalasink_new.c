@@ -1449,7 +1449,7 @@ static gpointer xrun_thread(gpointer para)
   while (!priv->quit_xrun_thread) {
     /* cobalt cert requires pause avsync to stop video rendering */
     if (!priv->xrun_paused &&
-           g_timer_elapsed(priv->xrun_timer, NULL) > 0.5) {
+           g_timer_elapsed(priv->xrun_timer, NULL) > 0.7) {
 #ifdef ENABLE_MS12
       char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
               "main_input_underrun");
