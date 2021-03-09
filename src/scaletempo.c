@@ -331,6 +331,11 @@ void scaletempo_update_segment (struct scale_tempo * scaletempo, GstSegment * se
       || scaletempo->scale != ABS (segment->rate)) {
     if (segment->format != GST_FORMAT_TIME || ABS (segment->rate - 1.0) < 1e-10) {
       scaletempo->scale = 1.0;
+      scaletempo->bytes_stride_scaled =
+          scaletempo->bytes_stride;
+      scaletempo->frames_stride_scaled =
+          scaletempo->bytes_stride_scaled / scaletempo->bytes_per_frame;
+      scaletempo->bytes_to_slide = 0;
     } else {
       scaletempo->scale = ABS (segment->rate);
       scaletempo->bytes_stride_scaled =

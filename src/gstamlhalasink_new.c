@@ -137,7 +137,7 @@ struct _GstAmlHalAsinkPrivate
 
   /* tempo stretch */
   struct scale_tempo st;
-  gboolean trick_play;
+  gboolean tempo_used;
 
   /* pause pts */
   uint32_t pause_pts;
@@ -1030,7 +1030,11 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   /* We need to resync since the ringbuffer restarted */
   gst_aml_hal_asink_reset_sync (sink);
 
-  scaletempo_set_info (&priv->st, &priv->spec.info);
+  if (is_raw_type(spec->type)) {
+    priv->tempo_used = TRUE;
+    scaletempo_start (&priv->st);
+    scaletempo_set_info (&priv->st, &spec->info);
+  }
 
   gst_element_post_message (GST_ELEMENT_CAST (bsink),
       gst_message_new_latency (GST_OBJECT (bsink)));
@@ -1066,9 +1070,8 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   priv->wrapping_time = 0;
   priv->last_pcr = 0;
   gst_caps_replace (&priv->spec.caps, NULL);
-  scaletempo_stop (&priv->st);
-  priv->trick_play = FALSE;
   priv->segment.start = GST_CLOCK_TIME_NONE;
+  priv->segment.rate = 1.0f;
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
@@ -1325,26 +1328,12 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         priv->segment.rate = segment.rate;
       }
 
-      /* prepare for trick play */
-      if (segment.rate != 1 && segment.rate != 0
-              && priv->format_ == AUDIO_FORMAT_PCM_16_BIT) {
-        priv->trick_play = TRUE;
-        scaletempo_start (&priv->st);
+      if (priv->tempo_used)
         scaletempo_update_segment (&priv->st, &priv->segment);
 
-        if (priv->direct_mode_) {
-          update_pcr_speed(segment.rate);
-          GST_INFO_OBJECT (sink, "pcr rate updated");
-        }
-      } else if (segment.rate == 1) {
-        if (priv->trick_play) {
-          scaletempo_stop (&priv->st);
-          priv->trick_play = FALSE;
-        }
-        if (priv->direct_mode_) {
-          update_pcr_speed(1);
-          GST_INFO_OBJECT (sink, "pcr rate recovered");
-        }
+      if (priv->direct_mode_) {
+        update_pcr_speed(segment.rate);
+        GST_INFO_OBJECT (sink, "pcr rate to %f", segment.rate);
       }
       break;
     }
@@ -1587,7 +1576,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   priv->eos_time = cstop;
 
-  if (priv->trick_play) {
+  if (priv->tempo_used) {
     GstBuffer *outbuffer = NULL;
     gsize insize, outsize;
 
@@ -1720,6 +1709,11 @@ static void paused_to_ready(GstAmlHalAsink *sink)
   priv->quit_clock_wait = TRUE;
 
   gst_aml_hal_asink_reset_sync (sink);
+
+  if (priv->tempo_used) {
+    scaletempo_stop (&priv->st);
+    priv->tempo_used = FALSE;
+  }
   GST_OBJECT_UNLOCK (sink);
 }
 
