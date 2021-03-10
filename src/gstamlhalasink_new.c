@@ -155,6 +155,7 @@ struct _GstAmlHalAsinkPrivate
   gboolean quit_xrun_thread;
   GTimer *xrun_timer;
   gboolean xrun_paused;
+  gboolean disable_xrun;
 
 #ifdef ESSOS_RM
   EssRMgr *rm;
@@ -172,6 +173,7 @@ enum
   PROP_MUTE,
   PROP_PCR_MASTER,
   PROP_PAUSE_PTS,
+  PROP_DISABLE_XRUN_TIMER,
   PROP_LAST
 };
 
@@ -357,6 +359,11 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       g_param_spec_uint ("pause-pts", "pause pts",
         "notify arrival of pts (90KHz), caller should pause the sink, set it in READY state",
         0, G_MAXUINT, 0, G_PARAM_WRITABLE));
+
+  g_object_class_install_property (gobject_class, PROP_DISABLE_XRUN_TIMER,
+      g_param_spec_boolean ("disable-xrun", "Disable underrun timer",
+          "If the audio stream is not stable like in Mircast case, set it to prevent unexpected pause",
+          FALSE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
 
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
@@ -862,6 +869,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     case PROP_PAUSE_PTS:
       priv->pause_pts = g_value_get_uint (value);
       GST_WARNING_OBJECT (sink, "pause PTS %u", priv->pause_pts);
+      break;
+    case PROP_DISABLE_XRUN_TIMER:
+      priv->disable_xrun = g_value_get_boolean(value);
+      GST_WARNING_OBJECT (sink, "disable xrun %d", priv->disable_xrun);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -1628,7 +1639,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 #ifdef ENABLE_XRUN_DETECTION
   GST_OBJECT_LOCK (sink);
   if (!priv->pcr_master_ && priv->stream_ &&
-      !priv->xrun_thread &&
+      !priv->xrun_thread && !priv->disable_xrun &&
       start_xrun_thread (sink)) {
     ret = GST_FLOW_ERROR;
     GST_OBJECT_UNLOCK (sink);
