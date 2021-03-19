@@ -2583,9 +2583,11 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     uint64_t pts_inc = 0;
     guchar * trans_data = NULL;
 
-    if (!raw_data && priv->format_ != AUDIO_FORMAT_AC4) {
-      /* Frame aligned, AC4 has constant bit rate (CBR) and variable bit reate(VBR) streams
-       * And VBR doesn't have to be encoded size aligned
+    if (priv->format_ == AUDIO_FORMAT_AC3) {
+      /* Frame aligned
+       * AC4 has constant bit rate (CBR) and variable bit reate(VBR) streams
+       * And VBR doesn't have to be encoded size aligned.
+       * EAC3 has dependent stream and substream. Hard to split.
        */
       if (parse_bit_stream(sink, data, towrite) < 0 || towrite < priv->encoded_size) {
         GST_WARNING_OBJECT (sink, "stream not frame aligned left %d discarded", towrite);
