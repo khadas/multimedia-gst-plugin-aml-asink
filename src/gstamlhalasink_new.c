@@ -32,6 +32,7 @@
 #include <math.h>
 #include <gst/audio/audio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <audio_if_client.h>
 #include "gstamlhalasink_new.h"
 #include "ac4_frame_parse.h"
@@ -162,6 +163,10 @@ struct _GstAmlHalAsinkPrivate
   EssRMgr *rm;
   int resAssignedId;
 #endif
+
+  /* debugging */
+  gboolean diag_log_enable;
+  char *log_path;
 };
 
 enum
@@ -451,6 +456,14 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
 
+  {
+    char *path = getenv("AV_PROGRESSION");
+    if (path) {
+      priv->diag_log_enable = TRUE;
+      priv->log_path = path;
+      GST_WARNING ("enable AV Progression logging");
+    }
+  }
 #ifdef ESSOS_RM
   priv->rm = 0;
   priv->resAssignedId = -1;
@@ -2557,6 +2570,20 @@ static void dump(const char* path, const uint8_t *data, int size) {
 #endif
 }
 
+static void diag_print(GstAmlHalAsink * sink, uint32_t pts_90k)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  struct timespec ts;
+  FILE *fd;
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  fd = fopen(priv->log_path, "a+");
+  if (fd) {
+    fprintf(fd, "[%6lu.%06lu](GtoA, %u)\n", ts.tv_sec, ts.tv_nsec/1000, pts_90k);
+    fclose(fd);
+  }
+}
+
 static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     gint size, guint64 pts_64)
 {
@@ -2685,6 +2712,8 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
          if (!priv->pcr_master_)
            tsync_set_first_apts(priv->first_pts);
       }
+      if (priv->diag_log_enable)
+        diag_print (sink, pts_32);
     } else if (raw_data) {
       /* audio hal can not handle too big frame, limit to 4K*/
       if (cur_size > 4*1024) {
