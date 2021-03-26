@@ -517,9 +517,12 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   {
     char *path = getenv("AV_PROGRESSION");
     if (path) {
-      priv->diag_log_enable = TRUE;
-      priv->log_path = path;
-      GST_WARNING ("enable AV Progression logging");
+      priv->log_path = g_malloc(128);
+      if (priv->log_path) {
+        snprintf(priv->log_path, 128, "%s.gtoa", path);
+        priv->diag_log_enable = TRUE;
+        GST_WARNING ("enable AV Progression logging");
+      }
     }
   }
 #ifdef ESSOS_RM
@@ -543,6 +546,7 @@ gst_aml_hal_asink_dispose (GObject * object)
 
   g_mutex_clear (&priv->feed_lock);
   g_cond_clear (&priv->run_ready);
+  g_free (priv->log_path);
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }
 
