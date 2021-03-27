@@ -24,6 +24,7 @@
  *
  */
 
+#include <inttypes.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
@@ -167,8 +168,26 @@ struct _GstAmlHalAsinkPrivate
   /* debugging */
   gboolean diag_log_enable;
   char *log_path;
+
+  /* pts gap info, pts/duration in ms unit */
+  int     gap_state;
+  int64_t gap_start_pts;
+  int32_t gap_duration;
 };
 
+enum
+{
+  GAP_IDLE,
+  GAP_MUTING_1,
+  GAP_MUTING_2,
+  GAP_RAMP_UP
+};
+
+enum
+{
+  RAMP_DOWN,
+  RAMP_UP
+};
 enum
 {
   PROP_0,
@@ -181,6 +200,8 @@ enum
   PROP_PCR_MASTER,
   PROP_PAUSE_PTS,
   PROP_DISABLE_XRUN_TIMER,
+  PROP_GAP_START_PTS,
+  PROP_GAP_DURATION,
   PROP_LAST
 };
 
@@ -297,6 +318,7 @@ static void dump(const char* path, const uint8_t *data, int size);
 static int tsync_send_audio_event(const char* event);
 static int tsync_reset_pcr (GstAmlHalAsink * sink);
 static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts);
+static void vol_ramp(guchar * data, gint size, int dir);
 
 static void
 gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
@@ -371,6 +393,16 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       g_param_spec_uint ("pause-pts", "pause pts",
         "notify arrival of pts (90KHz), caller should pause the sink, set it in READY state",
         0, G_MAXUINT, 0, G_PARAM_WRITABLE));
+
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_GAP_START_PTS,
+      g_param_spec_int64 ("gap-start-pts", "gap start pts",
+        "notify arrival of pts discontinuity start point in ms",
+        G_MININT64, G_MAXINT64, -1, G_PARAM_WRITABLE));
+
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_GAP_DURATION,
+      g_param_spec_int ("gap-duration", "gap duration",
+        "notify pts discontinuity length in ms",
+        0, G_MAXINT, 0, G_PARAM_WRITABLE));
 
   g_object_class_install_property (gobject_class, PROP_DISABLE_XRUN_TIMER,
       g_param_spec_boolean ("disable-xrun", "Disable underrun timer",
@@ -451,6 +483,9 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->received_eos = FALSE;
   priv->group_id = -1;
   priv->pause_pts = -1;
+  priv->gap_state = GAP_IDLE;
+  priv->gap_start_pts = -1;
+  priv->gap_duration = 0;
   priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
@@ -900,6 +935,14 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->disable_xrun = g_value_get_boolean(value);
       GST_WARNING_OBJECT (sink, "disable xrun %d", priv->disable_xrun);
       break;
+    case PROP_GAP_START_PTS:
+      priv->gap_start_pts = g_value_get_int64(value);
+      GST_WARNING_OBJECT (sink, "gap start PTS %" PRId64, priv->gap_start_pts);
+      break;
+    case PROP_GAP_DURATION:
+      priv->gap_duration = g_value_get_int(value);
+      GST_WARNING_OBJECT (sink, "gap duration %d", priv->gap_duration);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -1113,6 +1156,9 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   gst_caps_replace (&priv->spec.caps, NULL);
   priv->segment.start = GST_CLOCK_TIME_NONE;
   priv->segment.rate = 1.0f;
+  priv->gap_state = GAP_IDLE;
+  priv->gap_start_pts = -1;
+  priv->gap_duration = 0;
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
@@ -1339,6 +1385,9 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
 #ifdef DUMP_TO_FILE
     file_index++;
 #endif
+      priv->gap_state = GAP_IDLE;
+      priv->gap_start_pts = -1;
+      priv->gap_duration = 0;
       break;
     }
     case GST_EVENT_SEGMENT:
@@ -1388,6 +1437,9 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       priv->group_id = group_id;
       priv->group_done = FALSE;
       priv->eos_end_time = GST_CLOCK_TIME_NONE;
+      priv->gap_state = GAP_IDLE;
+      priv->gap_start_pts = -1;
+      priv->gap_duration = 0;
       GST_DEBUG_OBJECT (sink, "stream start, gid %d", group_id);
       return GST_BASE_SINK_CLASS (parent_class)->event (bsink, event);
     }
@@ -1661,7 +1713,63 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     goto done;
   }
 
-  hal_commit (sink, data, size, time);
+ if (priv->format_ == AUDIO_FORMAT_PCM_16_BIT) {
+      if ((priv->gap_state == GAP_IDLE) &&
+          (priv->gap_start_pts != -1) &&
+          (time >= (priv->gap_start_pts * GST_MSECOND))) {
+        // PCM volume ramping down
+        GST_DEBUG_OBJECT(sink, "PCM volume ramping down %" PRId64 "ms @%" PRId64 " size %d",
+          priv->gap_start_pts, time, size);
+        vol_ramp(data, size, RAMP_DOWN);
+        hal_commit (sink, data, size, time);
+
+        // insert silence
+        if (priv->gap_duration > 0) {
+          GST_DEBUG_OBJECT(sink, "PCM insert silence %d ms", priv->gap_duration);
+          int32_t filled_ms = 0;
+          int32_t bytes_per_ms = 48 * 4;
+          uint8_t *silence = (uint8_t *)g_malloc(16 * bytes_per_ms);
+          if (silence) {
+            memset(silence, 0, 16 * bytes_per_ms);
+            time += (int64_t)size * GST_MSECOND / bytes_per_ms;
+            while ((filled_ms < priv->gap_duration) &&
+              (!priv->flushing_)) {
+              int insert_ms = priv->gap_duration - filled_ms;
+              if (insert_ms > 16) insert_ms = 16;
+              GST_DEBUG_OBJECT(sink, "PCM silence @%" PRId64, time + filled_ms * GST_MSECOND);
+              hal_commit (sink, silence, insert_ms * bytes_per_ms, time + filled_ms * GST_MSECOND);
+              filled_ms += insert_ms;
+              priv->render_samples += filled_ms * 48;
+            }
+            g_free(silence);
+          }
+          priv->gap_duration = 0;
+        }
+        priv->gap_start_pts = -1;
+        priv->gap_state = GAP_MUTING_1;
+      } else if (priv->gap_state == GAP_MUTING_1) {
+        GST_DEBUG_OBJECT(sink, "Muting 1 @%" PRId64 " size %d", time, size);
+        memset(data, 0, size);
+        hal_commit (sink, data, size, time);
+        priv->gap_state = GAP_MUTING_2;
+      } else if (priv->gap_state == GAP_MUTING_2) {
+        GST_DEBUG_OBJECT(sink, "Muting 2 @%" PRId64 " size %d", time, size);
+        memset(data, 0, size);
+        hal_commit (sink, data, size, time);
+        priv->gap_state = GAP_RAMP_UP;
+      } else if (priv->gap_state == GAP_RAMP_UP) {
+        // PCM volume ramping up
+        GST_DEBUG_OBJECT(sink, "PCM volume ramping up @%" PRId64 " size %d", time, size);
+        vol_ramp(data, size, RAMP_UP);
+        hal_commit (sink, data, size, time);
+        priv->gap_state = GAP_IDLE;
+      } else {
+        hal_commit (sink, data, size, time);
+      }
+  } else {
+    hal_commit (sink, data, size, time);
+  }
+
   g_mutex_unlock(&priv->feed_lock);
   gst_buffer_unmap (buf, &info);
   priv->render_samples += samples;
@@ -2581,6 +2689,28 @@ static void diag_print(GstAmlHalAsink * sink, uint32_t pts_90k)
   if (fd) {
     fprintf(fd, "[%6lu.%06lu](GtoA, %u)\n", ts.tv_sec, ts.tv_nsec/1000, pts_90k);
     fclose(fd);
+  }
+}
+
+static void vol_ramp(guchar * data, gint size, int dir)
+{
+  int i;
+  int frames = size / 4;
+  int16_t *l = (int16_t *)(data);
+  int16_t *r = l + 1;
+
+  if (dir == RAMP_DOWN) {
+    for (i = 0; i < frames; i++, l+=2, r+=2) {
+      float t = (float)(i) / frames;
+      *l *= 1.0f - t * t * t;
+      *r *= 1.0f - t * t * t;
+    }
+  } else {
+     for (i = 0; i < frames; i++, l+=2, r+=2) {
+      float t = (float)i / frames - 1.0;
+      *l *= t * t * t + 1;
+      *r *= t * t * t + 1;
+    }
   }
 }
 
