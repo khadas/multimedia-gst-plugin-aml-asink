@@ -300,7 +300,7 @@ static gboolean gst_aml_hal_asink_query(GstElement * element, GstQuery *
     query);
 
 static GstClock *gst_aml_hal_asink_provide_clock(GstElement * elem);
-static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink);
+static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean keep_position);
 static GstClockTime gst_aml_hal_asink_get_time(GstClock * clock, GstAmlHalAsink * sink);
 
 static GstFlowReturn gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buffer);
@@ -598,7 +598,10 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   }
 
   if (!priv->render_samples) {
-    *cur = GST_CLOCK_TIME_NONE;
+    if (priv->segment.start != GST_CLOCK_TIME_NONE)
+      *cur = priv->segment.start;
+    else
+      *cur = GST_CLOCK_TIME_NONE;
     return TRUE;
   }
 
@@ -616,6 +619,10 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   if (pcr == -1) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
+  } else if ((int)pcr < 0 && (int)priv->first_pts >= 0 &&
+                priv->sync_mode == SYNC_AMASTER) {
+    pcr = priv->first_pts;
+    GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
   }
 
   if (priv->last_pcr > 0xF0000000 && pcr < 10*PTS_90K) {
@@ -632,7 +639,8 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
   *cur = priv->first_pts_64 + timepassed;
 
-  GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
+  GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT " pcr: %u",
+                  GST_TIME_ARGS (*cur), pcr);
   if (GST_FORMAT_TIME != format) {
     gboolean ret;
 
@@ -1191,15 +1199,8 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
     gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume);
   }
 
-#if 0
-  /* If we use our own clock, we need to adjust the offset since it will now
-   * restart from zero */
-  if (gst_aml_hal_asink_is_self_provided_clock (sink))
-    gst_audio_clock_reset (GST_AUDIO_CLOCK (sink->provided_clock), 0);
-#endif
-
   /* We need to resync since the ringbuffer restarted */
-  gst_aml_hal_asink_reset_sync (sink);
+  gst_aml_hal_asink_reset_sync (sink, FALSE);
 
   if (is_raw_type(spec->type)) {
     priv->tempo_used = TRUE;
@@ -1227,7 +1228,7 @@ acquire_error:
   }
 }
 
-static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
+static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean keep_position)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
@@ -1235,17 +1236,20 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink)
   priv->received_eos = FALSE;
   priv->eos = FALSE;
   priv->last_ts = GST_CLOCK_TIME_NONE;
-  priv->render_samples = 0;
   priv->flushing_ = FALSE;
   priv->first_pts_set = FALSE;
   priv->wrapping_time = 0;
   priv->last_pcr = 0;
   gst_caps_replace (&priv->spec.caps, NULL);
-  priv->segment.start = GST_CLOCK_TIME_NONE;
   priv->segment.rate = 1.0f;
   priv->gap_state = GAP_IDLE;
   priv->gap_start_pts = -1;
   priv->gap_duration = 0;
+
+  if (!keep_position) {
+    priv->render_samples = 0;
+    priv->segment.start = GST_CLOCK_TIME_NONE;
+  }
 }
 
 static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer,
@@ -1462,14 +1466,14 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       }
       GST_OBJECT_UNLOCK (sink);
 
-      gst_aml_hal_asink_reset_sync (sink);
+      gst_aml_hal_asink_reset_sync (sink, TRUE);
       if (reset_time) {
         GST_DEBUG_OBJECT (sink, "posting reset-time message");
         gst_element_post_message (GST_ELEMENT_CAST (sink),
             gst_message_new_reset_time (GST_OBJECT_CAST (sink), 0));
       }
 #ifdef DUMP_TO_FILE
-    file_index++;
+      file_index++;
 #endif
       priv->gap_state = GAP_IDLE;
       priv->gap_start_pts = -1;
@@ -1491,6 +1495,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           segment.rate = priv->segment.rate;
         }
         priv->segment = segment;
+        priv->render_samples = 0;
         seg_rec = gst_message_new_info_with_details (GST_OBJECT_CAST (sink),
             NULL, "segment-received", gst_structure_new_empty("segment-received"));
         if (seg_rec)
@@ -1560,7 +1565,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       priv->group_done = TRUE;
       priv->eos_end_time = priv->eos_time;
       GST_OBJECT_UNLOCK (sink);
-      gst_aml_hal_asink_reset_sync (sink);
+      gst_aml_hal_asink_reset_sync (sink, FALSE);
       break;
     }
     case GST_EVENT_GAP:
@@ -1811,11 +1816,13 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     if (!gst_buffer_get_size(buf)) {
       /* lenth 0 can not be commited */
       priv->render_samples += samples;
+      GST_LOG_OBJECT (sink, "skip length 0 buff");
       goto done;
     }
     time = GST_BUFFER_TIMESTAMP (buf);
   }
 
+  priv->render_samples += samples;
   gst_buffer_map (buf, &info, GST_MAP_READ);
   data = info.data;
   size = info.size;
@@ -1891,7 +1898,6 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   g_mutex_unlock(&priv->feed_lock);
   gst_buffer_unmap (buf, &info);
-  priv->render_samples += samples;
 
 #ifdef ENABLE_XRUN_DETECTION
   GST_OBJECT_LOCK (sink);
@@ -1968,7 +1974,7 @@ static void paused_to_ready(GstAmlHalAsink *sink)
   hal_release (sink);
   priv->quit_clock_wait = TRUE;
 
-  gst_aml_hal_asink_reset_sync (sink);
+  gst_aml_hal_asink_reset_sync (sink, FALSE);
 
   if (priv->tempo_used) {
     scaletempo_stop (&priv->st);
@@ -2087,7 +2093,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
     case GST_STATE_CHANGE_READY_TO_PAUSED:
       GST_INFO_OBJECT(sink, "ready to paused");
       gst_base_sink_set_async_enabled (GST_BASE_SINK_CAST(sink), FALSE);
-      gst_aml_hal_asink_reset_sync (sink);
+      gst_aml_hal_asink_reset_sync (sink, FALSE);
       /* start in paused state until PLAYING */
       priv->paused_ = TRUE;
       priv->quit_clock_wait = FALSE;
