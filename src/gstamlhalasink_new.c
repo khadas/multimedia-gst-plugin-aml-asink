@@ -167,9 +167,10 @@ struct _GstAmlHalAsinkPrivate
   char *log_path;
 
   /* pts gap info, pts/duration in ms unit */
-  int     gap_state;
-  int64_t gap_start_pts;
-  int32_t gap_duration;
+  int      gap_state;
+  int64_t  gap_start_pts;
+  int32_t  gap_duration;
+  uint64_t gap_offset;
 
   /* avsync */
   void * avsync;
@@ -506,6 +507,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->gap_state = GAP_IDLE;
   priv->gap_start_pts = -1;
   priv->gap_duration = 0;
+  priv->gap_offset = 0;
   priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
   priv->session_id = -1;
   g_mutex_init (&priv->feed_lock);
@@ -1245,6 +1247,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
   priv->gap_state = GAP_IDLE;
   priv->gap_start_pts = -1;
   priv->gap_duration = 0;
+  priv->gap_offset = 0;
 
   if (!keep_position) {
     priv->render_samples = 0;
@@ -1475,9 +1478,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
 #ifdef DUMP_TO_FILE
       file_index++;
 #endif
-      priv->gap_state = GAP_IDLE;
-      priv->gap_start_pts = -1;
-      priv->gap_duration = 0;
       break;
     }
     case GST_EVENT_SEGMENT:
@@ -1546,6 +1546,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       priv->gap_state = GAP_IDLE;
       priv->gap_start_pts = -1;
       priv->gap_duration = 0;
+      priv->gap_offset = 0;
       GST_DEBUG_OBJECT (sink, "stream start, gid %d", group_id);
       return GST_BASE_SINK_CLASS (parent_class)->event (bsink, event);
     }
@@ -1892,6 +1893,19 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       } else {
         hal_commit (sink, data, size, time);
       }
+  } else if (priv->format_ == AUDIO_FORMAT_E_AC3) {
+      if ((priv->gap_start_pts != -1) &&
+          (time >= (priv->gap_start_pts * GST_MSECOND))) {
+        char cmd[32] = {0};
+        snprintf(cmd, sizeof(cmd), "pts_gap=%llu,%d",
+          (unsigned long long)priv->gap_offset, priv->gap_duration);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, cmd);
+        GST_DEBUG_OBJECT(sink, "E-AC3 %s", cmd);
+        priv->gap_start_pts = -1;
+        priv->gap_duration = 0;
+      }
+      hal_commit (sink, data, size, time);
+      priv->gap_offset += size;
   } else {
     hal_commit (sink, data, size, time);
   }
