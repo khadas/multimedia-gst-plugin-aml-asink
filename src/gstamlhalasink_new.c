@@ -611,7 +611,15 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     //TODO(song): get HAL position
     *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
     GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
-    return FALSE;
+    if (GST_FORMAT_TIME != format) {
+      gboolean ret;
+
+      /* convert to final format */
+      ret = gst_audio_info_convert (&priv->spec.info, GST_FORMAT_TIME, *cur, format, cur);
+      if (!ret)
+        return FALSE;
+    }
+    return TRUE;
   }
 
   rc = avsync_get_time(sink, &pcr);
@@ -950,6 +958,11 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->direct_mode_ = g_value_get_boolean(value);
       GST_DEBUG_OBJECT (sink, "set direct mode:%d", priv->direct_mode_);
       GST_OBJECT_LOCK (sink);
+      if (priv->tempo_used && !priv->direct_mode_) {
+        GST_DEBUG_OBJECT (sink, "disable scaletempo for non-direct mode");
+        scaletempo_stop (&priv->st);
+        priv->tempo_used = FALSE;
+      }
       if (!priv->direct_mode_ && priv->provided_clock) {
         GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
         GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
@@ -1204,7 +1217,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   /* We need to resync since the ringbuffer restarted */
   gst_aml_hal_asink_reset_sync (sink, FALSE);
 
-  if (is_raw_type(spec->type)) {
+  if (is_raw_type(spec->type) && priv->direct_mode_) {
     priv->tempo_used = TRUE;
     scaletempo_start (&priv->st);
     scaletempo_set_info (&priv->st, &spec->info);
