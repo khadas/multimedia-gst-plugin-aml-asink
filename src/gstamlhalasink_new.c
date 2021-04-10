@@ -1820,7 +1820,11 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       GST_LOG_OBJECT (sink, "skip length 0 buff");
       goto done;
     }
-    time = GST_BUFFER_TIMESTAMP (buf);
+    /* note: do not update time to output buffer
+       time = GST_BUFFER_TIMESTAMP (buf);
+     * it is based on the scaled time axis. When 2x
+     * playback, the time will be 1/2 of real time.
+     */
   }
 
   priv->render_samples += samples;
