@@ -409,9 +409,9 @@ gboolean scaletempo_stop (struct scale_tempo * scaletempo)
 void scaletempo_init (struct scale_tempo * scaletempo)
 {
   /* defaults */
-  scaletempo->ms_stride = 30;
+  scaletempo->ms_stride = 25;
   scaletempo->percent_overlap = .2;
-  scaletempo->ms_search = 14;
+  scaletempo->ms_search = 10;
 
   /* uninitialized */
   scaletempo->scale = 0;
