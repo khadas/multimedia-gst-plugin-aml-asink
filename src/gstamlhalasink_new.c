@@ -379,8 +379,8 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
 
   g_object_class_install_property (gobject_class,
       PROP_MASTER_VOLUME,
-      g_param_spec_double ("volume", "Master volume",
-          "Linear volume of system, 1.0=100%", 0.0, MAX_VOLUME,
+      g_param_spec_double ("volume", "Stream volume, the same as stream-volume",
+          "Linear volume of current stream, 1.0=100%", 0.0, MAX_VOLUME,
           DEFAULT_VOLUME, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
@@ -510,6 +510,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->gap_offset = 0;
   priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
   priv->session_id = -1;
+  priv->stream_volume = 1.0;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
@@ -843,53 +844,6 @@ done:
   return result;
 }
 
-static gdouble
-gst_aml_hal_sink_get_master_volume (GstAmlHalAsink * sink)
-{
-  GstAmlHalAsinkPrivate *priv = sink->priv;
-  int ret;
-  float vol = 0.0;
-
-  GST_OBJECT_LOCK (sink);
-  if (!priv->hw_dev_) {
-    GST_OBJECT_UNLOCK (sink);
-    GST_ERROR_OBJECT(sink, "audio HAL not open yet");
-    return vol;
-  }
-
-  ret = priv->hw_dev_->get_master_volume(priv->hw_dev_, &vol);
-  GST_OBJECT_UNLOCK (sink);
-  if (ret) {
-    GST_ERROR_OBJECT(sink, "get_master_volume fail: %d",ret);
-    return vol;
-  }
-  GST_LOG_OBJECT (sink, "master vol:%f", vol);
-  return vol;
-}
-
-static void
-gst_aml_hal_sink_set_master_volume (GstAmlHalAsink * sink, float vol)
-{
-  GstAmlHalAsinkPrivate *priv = sink->priv;
-  int ret;
-
-  GST_OBJECT_LOCK (sink);
-  if (!priv->hw_dev_) {
-    GST_OBJECT_UNLOCK (sink);
-    GST_WARNING_OBJECT(sink, "audio HAL not open yet, delayed");
-    priv->master_volume_pending = TRUE;
-    priv->master_volume = vol;
-    return;
-  }
-
-  ret = priv->hw_dev_->set_master_volume (priv->hw_dev_, vol);
-  GST_OBJECT_UNLOCK (sink);
-  if (ret)
-    GST_ERROR_OBJECT(sink, "set_master_volume fail %d", ret);
-  else
-    GST_LOG_OBJECT(sink, "master volume set to %f", vol);
-}
-
 static void
 gst_aml_hal_sink_set_stream_volume (GstAmlHalAsink * sink, float vol)
 {
@@ -991,11 +945,6 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       GST_DEBUG_OBJECT (sink, "set output port:%d", priv->output_port_);
       break;
     case PROP_MASTER_VOLUME:
-    {
-      float vol = g_value_get_double (value);
-      gst_aml_hal_sink_set_master_volume (sink, vol); 
-      break;
-    }
     case PROP_STREAM_VOLUME:
     {
       float vol = g_value_get_double (value);
@@ -1075,8 +1024,6 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       GST_DEBUG_OBJECT (sink, "get output port:%d", priv->output_port_);
       break;
     case PROP_MASTER_VOLUME:
-      g_value_set_double (value, gst_aml_hal_sink_get_master_volume(sink));
-      break;
     case PROP_STREAM_VOLUME:
       g_value_set_double (value, priv->stream_volume); 
       break;
@@ -2110,11 +2057,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
       if (!gst_aml_hal_asink_open (sink)) {
         GST_ERROR_OBJECT(sink, "asink open failure");
         goto open_failed;
-      }
-
-      if (priv->master_volume_pending) {
-        priv->master_volume_pending = FALSE;
-        gst_aml_hal_sink_set_master_volume (sink, priv->master_volume);
       }
 
       GST_OBJECT_LOCK (sink);
