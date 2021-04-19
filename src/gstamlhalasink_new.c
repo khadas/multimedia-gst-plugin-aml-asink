@@ -2783,7 +2783,7 @@ static void diag_print(GstAmlHalAsink * sink, uint32_t pts_90k)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   fd = fopen(priv->log_path, "a+");
   if (fd) {
-    fprintf(fd, "[%6lu.%06lu](GtoA, %u)\n", ts.tv_sec, ts.tv_nsec/1000, pts_90k);
+    fprintf(fd, "[%6lu.%06lu] %u 0 A GtoA\n", ts.tv_sec, ts.tv_nsec/1000, pts_90k);
     fclose(fd);
   }
 }
