@@ -126,7 +126,6 @@ struct _GstAmlHalAsinkPrivate
   guint wrapping_time;
   uint32_t last_pcr;
   uint32_t first_pts;
-  guint64  first_pts_64;
   gboolean first_pts_set;
 
   GstSegment segment;
@@ -652,7 +651,11 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     timepassed_90k = (int)(pcr - priv->first_pts) + (priv->wrapping_time-1)*0xFFFFFFFFLL;
 
   timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
-  *cur = priv->first_pts_64 + timepassed;
+  if (priv->segment.start != priv->segment.position &&
+        priv->segment.position != GST_CLOCK_TIME_NONE)
+    *cur = priv->segment.position + timepassed;
+  else
+    *cur = priv->segment.time + timepassed;
 
   GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT " pcr: %u",
                   GST_TIME_ARGS (*cur), pcr);
@@ -1742,18 +1745,12 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   if (!priv->first_pts_set) {
     uint32_t pts_32 = gst_util_uint64_scale_int (time, PTS_90K, GST_SECOND);
-    //truncate to 32bit PTS
-    guint64 pts_64 = gst_util_uint64_scale_int(pts_32, GST_SECOND, PTS_90K);
-
 
     priv->first_pts_set = TRUE;
-    if (priv->segment.start) {
+    if (priv->segment.start)
       priv->first_pts = pts_32;
-      priv->first_pts_64 = pts_64;
-    } else {
+    else
       priv->first_pts = 0;
-      priv->first_pts_64 = 0;
-    }
     GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
   }
 
