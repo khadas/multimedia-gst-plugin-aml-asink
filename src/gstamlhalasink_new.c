@@ -176,6 +176,8 @@ struct _GstAmlHalAsinkPrivate
   int session_id;
   GstClock *provided_clock;
   gboolean wait_video;
+  GstBuffer *start_buf; /* pcr master mode only */
+  gboolean start_buf_sent;
 };
 
 enum
@@ -1229,6 +1231,11 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
   priv->gap_start_pts = -1;
   priv->gap_duration = 0;
   priv->gap_offset = 0;
+  if (priv->start_buf) {
+    gst_buffer_unref (priv->start_buf);
+    priv->start_buf = NULL;
+  }
+  priv->start_buf_sent = FALSE;
 
   if (!keep_position) {
     priv->render_samples = 0;
@@ -1818,7 +1825,27 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     goto done;
   }
 
- if (priv->format_ == AUDIO_FORMAT_PCM_16_BIT) {
+  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+      /* ms12 2.4 needs 2 frames to decode immediately */
+      if(!priv->start_buf_sent && !priv->start_buf) {
+        priv->start_buf = gst_buffer_ref (buf);
+        GST_DEBUG_OBJECT (sink, "cache start buf %llu", time);
+        goto commit_done;
+      } else if (!priv->start_buf_sent) {
+        GstMapInfo info2;
+
+        gst_buffer_map (priv->start_buf, &info2, GST_MAP_READ);
+        hal_commit (sink, info2.data, info2.size,
+                GST_BUFFER_TIMESTAMP(priv->start_buf));
+        gst_buffer_unmap (priv->start_buf, &info2);
+        gst_buffer_unref (priv->start_buf);
+        priv->start_buf = NULL;
+        priv->start_buf_sent = TRUE;
+        GST_DEBUG_OBJECT (sink, "sent cache start buf");
+      }
+  }
+
+  if (priv->format_ == AUDIO_FORMAT_PCM_16_BIT) {
       if ((priv->gap_state == GAP_IDLE) &&
           (priv->gap_start_pts != -1) &&
           (time >= (priv->gap_start_pts * GST_MSECOND))) {
@@ -1888,6 +1915,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     hal_commit (sink, data, size, time);
   }
 
+commit_done:
   g_mutex_unlock(&priv->feed_lock);
   gst_buffer_unmap (buf, &info);
 
@@ -2116,6 +2144,10 @@ gst_aml_hal_asink_change_state (GstElement * element,
     {
       GstBaseSink* bsink = GST_BASE_SINK_CAST (sink);
       GST_INFO_OBJECT(sink, "playing to paused");
+      if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+        GST_INFO_OBJECT(sink, "avsync to free run");
+        av_sync_change_mode (priv->avsync, AV_SYNC_MODE_FREE_RUN);
+      }
       GST_OBJECT_LOCK (sink);
       hal_pause (sink);
       /* To complete transition to paused state in async_enabled mode,
