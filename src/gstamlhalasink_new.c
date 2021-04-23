@@ -508,6 +508,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->gap_duration = 0;
   priv->gap_offset = 0;
   priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
+  priv->sync_mode = AV_SYNC_MODE_AMASTER;
   priv->session_id = -1;
   priv->stream_volume = 1.0;
   g_mutex_init (&priv->feed_lock);
@@ -958,9 +959,22 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       gst_aml_hal_sink_set_mute (sink, g_value_get_boolean (value));
       break;
     case PROP_AVSYNC_MODE:
+    {
+      guint mode = g_value_get_uint (value);
+
       priv->sync_mode = g_value_get_uint (value);
+      if (mode == 0)
+        priv->sync_mode = AV_SYNC_MODE_AMASTER;
+      else if (mode == 1)
+        priv->sync_mode = AV_SYNC_MODE_PCR_MASTER;
+      else if (mode == 2)
+        priv->sync_mode = AV_SYNC_MODE_IPTV;
+      else
+        GST_ERROR_OBJECT (sink, "invalid sync mode %d", mode);
+
       GST_DEBUG_OBJECT (sink, "sync mode:%d", priv->sync_mode);
       break;
+    }
     case PROP_PAUSE_PTS:
       priv->pause_pts = g_value_get_uint (value);
       GST_WARNING_OBJECT (sink, "pause PTS %u", priv->pause_pts);
@@ -1479,7 +1493,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       /* create avsync before rate change */
       if (!priv->avsync && priv->direct_mode_) {
         char setting[20];
-        priv->avsync = av_sync_create (priv->session_id, AV_SYNC_MODE_AMASTER, AV_SYNC_TYPE_AUDIO, 0);
+        priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
         if (!priv->avsync) {
           GST_ERROR_OBJECT (sink, "create av sync fail");
           break;
