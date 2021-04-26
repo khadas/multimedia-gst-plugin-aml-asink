@@ -33,7 +33,6 @@ struct _GstAmlClockPrivate
   GstAmlClockGetTimeFunc   func;
   gpointer                 user_data;
   GDestroyNotify           destroy_notify;
-  GstClockTime             last_time;
 
   int session;
   int session_id;
@@ -82,7 +81,6 @@ gst_aml_clock_init (GstAmlClock * clock)
 #endif
   clock->priv = priv;
   priv->session_id = -1;
-  priv->last_time = 0;
 
   priv->session = av_sync_open_session(&priv->session_id);
   if (priv->session < 0) {
@@ -157,19 +155,9 @@ gst_aml_clock_get_internal_time (GstClock * clock)
 
 
   result = priv->func (clock, priv->user_data);
-  if (result == GST_CLOCK_TIME_NONE) {
-    result = priv->last_time;
-  } else {
-    /* clock must be increasing */
-    if (priv->last_time < result)
-      priv->last_time = result;
-    else
-      result = priv->last_time;
-  }
 
   GST_DEBUG_OBJECT (aclock,
-      "result %" GST_TIME_FORMAT ", last_time %" GST_TIME_FORMAT,
-      GST_TIME_ARGS (result), GST_TIME_ARGS (priv->last_time));
+      "result %" GST_TIME_FORMAT, GST_TIME_ARGS (result));
 
   return result;
 }
