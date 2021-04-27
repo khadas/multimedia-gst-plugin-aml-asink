@@ -1806,6 +1806,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   gst_buffer_map (buf, &info, GST_MAP_READ);
   data = info.data;
   size = info.size;
+  time = GST_BUFFER_TIMESTAMP (buf);
 
   g_mutex_lock(&priv->feed_lock);
   /* blocked on paused */
@@ -1941,7 +1942,7 @@ wrong_size:
     gst_buffer_map (buf, &info, GST_MAP_READ);
     data = info.data;
     size = info.size;
-    dump ("/tmp/asink_", data, size);
+    dump ("/tmp/asink_input_", data, size);
     gst_buffer_unmap (buf, &info);
 #endif
     ret = GST_FLOW_ERROR;
@@ -2877,6 +2878,10 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
         return size;
       }
       cur_size = priv->encoded_size;
+    } else if (priv->tempo_used) {
+      cur_size = scaletemp_get_stride(&priv->st);
+      if (cur_size > towrite)
+        cur_size = towrite;
     } else
       cur_size = towrite;
 
@@ -2964,6 +2969,9 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     towrite -= written;
     data += written;
 
+    GST_LOG_OBJECT (sink,
+        "write %d/%d left %d ts: %llu", written, cur_size, towrite, pts_64);
+
     /* update PTS for next sample */
     if (priv->direct_mode_) {
       if (priv->sr_) {
@@ -2984,8 +2992,6 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     if (priv->xrun_timer)
       g_timer_start(priv->xrun_timer);
 
-    GST_LOG_OBJECT (sink,
-        "write %d/%d left %d ts: %llu", written, cur_size, towrite, pts_64);
   }
 
   if (!raw_data)

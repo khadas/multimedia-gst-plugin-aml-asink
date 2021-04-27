@@ -44,38 +44,44 @@ best_overlap_offset_s16 (struct scale_tempo * st)
   guint best_off = 0;
   guint off;
   glong i;
+  guint ret = 0;
 
-  pw = st->table_window;
-  po = st->buf_overlap;
-  po += st->samples_per_frame;
-  ppc = st->buf_pre_corr;
-  for (i = st->samples_per_frame; i < st->samples_overlap; i++) {
-    *ppc++ = (*pw++ * *po++) >> 15;
-  }
-
-  search_start = (gint16 *) st->buf_queue + st->samples_per_frame;
-  for (off = 0; off < st->frames_search; off++) {
-    gint64 corr = 0;
-    gint16 *ps = search_start;
+  if (1.0 == st->scale){
+    ret = 0;
+  } else {
+    pw = st->table_window;
+    po = st->buf_overlap;
+    po += st->samples_per_frame;
     ppc = st->buf_pre_corr;
-    ppc += st->samples_overlap - st->samples_per_frame;
-    ps += st->samples_overlap - st->samples_per_frame;
-    i = -((glong) st->samples_overlap - (glong) st->samples_per_frame);
-    do {
-      corr += ppc[i + 0] * ps[i + 0];
-      corr += ppc[i + 1] * ps[i + 1];
-      corr += ppc[i + 2] * ps[i + 2];
-      corr += ppc[i + 3] * ps[i + 3];
-      i += 4;
-    } while (i < 0);
-    if (corr > best_corr) {
-      best_corr = corr;
-      best_off = off;
+    for (i = st->samples_per_frame; i < st->samples_overlap; i++) {
+      *ppc++ = (*pw++ * *po++) >> 15;
     }
-    search_start += st->samples_per_frame;
+
+    search_start = (gint16 *) st->buf_queue + st->samples_per_frame;
+    for (off = 0; off < st->frames_search; off++) {
+      gint64 corr = 0;
+      gint16 *ps = search_start;
+      ppc = st->buf_pre_corr;
+      ppc += st->samples_overlap - st->samples_per_frame;
+      ps += st->samples_overlap - st->samples_per_frame;
+      i = -((glong) st->samples_overlap - (glong) st->samples_per_frame);
+      do {
+        corr += ppc[i + 0] * ps[i + 0];
+        corr += ppc[i + 1] * ps[i + 1];
+        corr += ppc[i + 2] * ps[i + 2];
+        corr += ppc[i + 3] * ps[i + 3];
+        i += 4;
+      } while (i < 0);
+      if (corr > best_corr) {
+        best_corr = corr;
+        best_off = off;
+      }
+      search_start += st->samples_per_frame;
+    }
+    ret = best_off * st->bytes_per_frame;
   }
 
-  return best_off * st->bytes_per_frame;
+  return ret;
 }
 
 static void
@@ -86,9 +92,14 @@ output_overlap_s16 (struct scale_tempo * st, gpointer buf_out, guint bytes_off)
   gint16 *po = st->buf_overlap;
   gint16 *pin = (gint16 *) (st->buf_queue + bytes_off);
   gint i;
-  for (i = 0; i < st->samples_overlap; i++) {
-    *pout++ = *po - ((*pb++ * (*po - *pin++)) >> 16);
-    po++;
+
+  if (1.0 == st->scale){
+    memcpy (pout, st->buf_queue, st->bytes_overlap);
+  } else {
+    for (i = 0; i < st->samples_overlap; i++) {
+      *pout++ = *po - ((*pb++ * (*po - *pin++)) >> 16);
+      po++;
+    }
   }
 }
 
@@ -248,7 +259,8 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
   gint8 *pout;
   guint offset_in, bytes_out;
   GstMapInfo omap;
-  GstClockTime timestamp;
+  guint64 timestamp;
+  guint offset_out = 0;
 
   gst_buffer_map (outbuf, &omap, GST_MAP_WRITE);
   pout = (gint8 *) omap.data;
@@ -285,16 +297,13 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
   }
   gst_buffer_unmap (outbuf, &omap);
 
-  timestamp = GST_BUFFER_TIMESTAMP (inbuf) - st->in_segment.start;
-  if (timestamp < st->latency)
-    timestamp = 0;
-  else
-    timestamp -= st->latency;
 
-  GST_BUFFER_TIMESTAMP (outbuf) = timestamp / st->scale + st->in_segment.start;
   GST_BUFFER_DURATION (outbuf) =
     gst_util_uint64_scale (bytes_out, GST_SECOND,
     st->bytes_per_frame * st->sample_rate);
+  offset_out = bytes_out * st->scale + st->bytes_queued - gst_buffer_get_size (inbuf);
+  timestamp = GST_BUFFER_TIMESTAMP (inbuf) - gst_util_uint64_scale (offset_out, GST_SECOND, st->bytes_per_frame * st->sample_rate);;
+  GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
   gst_buffer_set_size (outbuf, bytes_out);
 
   return GST_FLOW_OK;
@@ -349,9 +358,7 @@ void scaletempo_update_segment (struct scale_tempo * scaletempo, GstSegment * se
       scaletempo->bytes_to_slide = 0;
     }
   }
-
-  scaletempo->in_segment = *segment;
-  scaletempo->out_segment = *segment;
+  scaletempo->segment_start = segment->start;
 }
 
 gboolean scaletempo_set_info (struct scale_tempo * scaletempo, GstAudioInfo * info)
@@ -382,8 +389,6 @@ gboolean scaletempo_set_info (struct scale_tempo * scaletempo, GstAudioInfo * in
 
 gboolean scaletempo_start (struct scale_tempo * scaletempo)
 {
-  gst_segment_init (&scaletempo->in_segment, GST_FORMAT_UNDEFINED);
-  gst_segment_init (&scaletempo->out_segment, GST_FORMAT_UNDEFINED);
   scaletempo->reinit_buffers = TRUE;
 
   return TRUE;
@@ -420,6 +425,10 @@ void scaletempo_init (struct scale_tempo * scaletempo)
   scaletempo->bytes_stride = 0;
   scaletempo->bytes_queued = 0;
   scaletempo->bytes_to_slide = 0;
-  gst_segment_init (&scaletempo->in_segment, GST_FORMAT_UNDEFINED);
-  gst_segment_init (&scaletempo->out_segment, GST_FORMAT_UNDEFINED);
+  scaletempo->segment_start = 0;
+}
+
+gint scaletemp_get_stride (struct scale_tempo * scaletempo)
+{
+  return scaletempo->bytes_stride;
 }

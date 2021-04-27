@@ -69,10 +69,7 @@ struct scale_tempo
   gpointer table_window;
   guint (*best_overlap_offset) (struct scale_tempo * scaletempo);
 
-  /* gstreamer */
-  GstSegment in_segment, out_segment;
-  GstClockTime latency;
-
+  gint64      segment_start;
   /* threads */
   gboolean reinit_buffers;
 };
@@ -87,3 +84,4 @@ gboolean scaletempo_transform_size (struct scale_tempo * scaletempo,
     gsize size, gsize * othersize);
 GstFlowReturn scaletempo_transform (struct scale_tempo * st,
     GstBuffer * inbuf, GstBuffer * outbuf);
+gint scaletemp_get_stride (struct scale_tempo * scaletempo);
