@@ -1790,8 +1790,6 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
     buf = outbuffer;
     if (!gst_buffer_get_size(buf)) {
-      /* lenth 0 can not be commited */
-      priv->render_samples += samples;
       GST_LOG_OBJECT (sink, "skip length 0 buff");
       goto done;
     }
