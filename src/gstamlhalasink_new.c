@@ -600,7 +600,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   int rc;
 
   if (priv->group_done) {
-    *cur = GST_CLOCK_TIME_NONE;
+    *cur = priv->eos_end_time;
     return TRUE;
   }
 
