@@ -2350,8 +2350,14 @@ hal_parse_spec (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
     priv->channel_mask_ = AUDIO_CHANNEL_OUT_MONO;
   else if (channels == 2)
     priv->channel_mask_ = AUDIO_CHANNEL_OUT_STEREO;
+  else if (channels == 3)
+    priv->channel_mask_ = AUDIO_CHANNEL_OUT_2POINT1;
+  else if (channels == 4)
+    priv->channel_mask_ = AUDIO_CHANNEL_OUT_2POINT0POINT2;
   else if (channels == 5 || channels == 6)
     priv->channel_mask_ = AUDIO_CHANNEL_OUT_5POINT1;
+  else if (channels == 7)
+    priv->channel_mask_ = AUDIO_CHANNEL_OUT_6POINT1;
   else if (channels == 8)
     priv->channel_mask_ = AUDIO_CHANNEL_OUT_7POINT1;
   else {
