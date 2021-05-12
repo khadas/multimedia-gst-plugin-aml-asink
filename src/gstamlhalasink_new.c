@@ -178,6 +178,7 @@ struct _GstAmlHalAsinkPrivate
   gboolean wait_video;
   GstBuffer *start_buf; /* pcr master mode only */
   gboolean start_buf_sent;
+  gboolean seamless_switch;
 };
 
 enum
@@ -216,6 +217,7 @@ enum
   PROP_GAP_DURATION,
   PROP_AVSYNC_SESSION,
   PROP_WAIT_FOR_VIDEO,
+  PROP_SEAMLESS_SWITCH,
   PROP_LAST
 };
 
@@ -223,6 +225,7 @@ enum
 {
   SIGNAL_PAUSEPTS,
   SIGNAL_XRUN,
+  SIGNAL_AUDSWITCH,
   MAX_SIGNAL
 };
 
@@ -433,6 +436,12 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Audio needs to align with video at starting point", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class,
+      PROP_SEAMLESS_SWITCH,
+      g_param_spec_boolean ("seamless-switch", "Seamless switch audio",
+          "Seamless switch audio channels on different formats", FALSE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
       (GSignalFlags) (G_SIGNAL_RUN_LAST),
@@ -446,6 +455,18 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       G_TYPE_POINTER);
 
   g_signals[SIGNAL_XRUN]= g_signal_new( "underrun-callback",
+      G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
+      (GSignalFlags) (G_SIGNAL_RUN_LAST),
+      0,    /* class offset */
+      NULL, /* accumulator */
+      NULL, /* accu data */
+      g_cclosure_marshal_VOID__UINT_POINTER,
+      G_TYPE_NONE,
+      2,
+      G_TYPE_UINT,
+      G_TYPE_POINTER);
+
+  g_signals[SIGNAL_AUDSWITCH]= g_signal_new( "seamless-switch-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
       (GSignalFlags) (G_SIGNAL_RUN_LAST),
       0,    /* class offset */
@@ -1017,6 +1038,15 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->wait_video = g_value_get_boolean(value);
       GST_WARNING_OBJECT (sink, "wait video:%d", priv->wait_video);
       break;
+    case PROP_SEAMLESS_SWITCH:
+      priv->seamless_switch = g_value_get_boolean(value);
+      GST_WARNING_OBJECT (sink, "seamless switch audio:%d", priv->seamless_switch);
+      if (priv->avsync) {
+           GST_INFO_OBJECT (sink, "AV sync set seamless switch:%d");
+           av_sync_set_audio_switch(priv->avsync, priv->seamless_switch);
+      }
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -1061,6 +1091,9 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       break;
     case PROP_WAIT_FOR_VIDEO:
       g_value_set_boolean (value, priv->wait_video);
+      break;
+    case PROP_SEAMLESS_SWITCH:
+      g_value_set_boolean (value, priv->seamless_switch);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -1340,6 +1373,12 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
       ret = GST_FLOW_OK;
     else
       ret = GST_FLOW_ERROR;
+
+    if (priv->seamless_switch && priv->avsync) {
+        GST_INFO_OBJECT (sink, "EOS reached clean audio seamless switch");
+        av_sync_set_audio_switch(priv->avsync, false);
+        priv->seamless_switch = false;
+    }
   }
   return ret;
 }
@@ -1500,11 +1539,21 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       /* create avsync before rate change */
       if (!priv->avsync && priv->direct_mode_) {
         char setting[20];
-        priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+         if (priv->seamless_switch) {
+           priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
+         } else {
+           priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+         }
         if (!priv->avsync) {
           GST_ERROR_OBJECT (sink, "create av sync fail");
           break;
         }
+        if (priv->seamless_switch)
+        {
+           GST_INFO_OBJECT (sink, "SET AVSYNC audio switch to ALIGN mode");
+           avs_sync_set_start_policy (priv->avsync, AV_SYNC_START_ALIGN);
+        }
+
         if (priv->wait_video)
           avs_sync_set_start_policy (priv->avsync, AV_SYNC_START_ALIGN);
         /* set session into hwsync id */
@@ -1624,6 +1673,16 @@ static gpointer xrun_thread(gpointer para)
   GST_INFO_OBJECT (sink, "enter");
   while (!priv->quit_xrun_thread) {
     /* cobalt cert requires pause avsync to stop video rendering */
+    if (priv->seamless_switch) {
+        bool result;
+        av_sync_get_audio_switch(priv->avsync,  &result);
+        if (!result) {
+           GST_INFO_OBJECT (sink, "audio seamless switch finish");
+           priv->seamless_switch = false;
+           // emit the event here if needed
+           g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_AUDSWITCH], 0, 0, NULL);
+        }
+    }
     if (!priv->xrun_paused &&
            g_timer_elapsed(priv->xrun_timer, NULL) > 0.7) {
 #ifdef ENABLE_MS12
@@ -1806,6 +1865,10 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
      * playback, the time will be 1/2 of real time.
      */
   }
+  //for those no bit stream parsed format EAC3 DTS render samples as buffers
+  // otherwise position always return the start position.
+  if (samples == 0)
+    samples = 1;
 
   priv->render_samples += samples;
   gst_buffer_map (buf, &info, GST_MAP_READ);
@@ -2194,6 +2257,13 @@ gst_aml_hal_asink_change_state (GstElement * element,
       }
 #endif
       gst_aml_hal_asink_close (sink);
+
+      priv->gap_state = GAP_IDLE;
+      priv->gap_start_pts = -1;
+      priv->gap_duration = 0;
+      priv->format_ = AUDIO_FORMAT_PCM_16_BIT;
+      scaletempo_init (&priv->st);
+
       GST_OBJECT_UNLOCK (sink);
       break;
     default:
