@@ -1042,7 +1042,8 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->seamless_switch = g_value_get_boolean(value);
       GST_WARNING_OBJECT (sink, "seamless switch audio:%d", priv->seamless_switch);
       if (priv->avsync) {
-           GST_INFO_OBJECT (sink, "AV sync set seamless switch:%d");
+           GST_INFO_OBJECT (sink, "AV sync set seamless switch:%d",
+                   priv->seamless_switch);
            av_sync_set_audio_switch(priv->avsync, priv->seamless_switch);
       }
       break;
@@ -1264,6 +1265,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
   priv->gap_start_pts = -1;
   priv->gap_duration = 0;
   priv->gap_offset = 0;
+  priv->quit_clock_wait = FALSE;
   if (priv->start_buf) {
     gst_buffer_unref (priv->start_buf);
     priv->start_buf = NULL;
@@ -1475,6 +1477,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       GST_OBJECT_LOCK (sink);
       priv->received_eos = FALSE;
       priv->flushing_ = TRUE;
+      priv->quit_clock_wait = TRUE;
       /* unblock hal_commit() */
       g_mutex_lock(&priv->feed_lock);
       g_cond_signal (&priv->run_ready);
@@ -1598,6 +1601,16 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       } else {
         GST_DEBUG_OBJECT (sink, "stream group done, gid %d", group_id);
       }
+
+      /* if audio stop in the middle, do not touch clock and
+       * let vidoe finish. Event GAP will update eos_end_time
+       */
+      if (GST_CLOCK_TIME_IS_VALID(priv->eos_end_time)
+              && (priv->eos_end_time - priv->eos_time) > GST_SECOND) {
+        GST_DEBUG_OBJECT (sink, "group-done ignore");
+        break;
+      }
+
       GST_OBJECT_LOCK (sink);
       hal_stop (sink);
       priv->group_done = TRUE;
@@ -1608,7 +1621,33 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     }
     case GST_EVENT_GAP:
     {
-      GST_DEBUG_OBJECT (sink, "ignore event-gap");
+      GstClockTime timestamp, duration, wait_end;
+
+      gst_event_parse_gap (event, &timestamp, &duration);
+      wait_end = timestamp + duration;
+
+      if (!GST_CLOCK_TIME_IS_VALID(duration) ||
+              !GST_CLOCK_TIME_IS_VALID(timestamp) ||
+              wait_end > priv->segment.start + priv->segment.duration) {
+        GST_DEBUG_OBJECT (sink, "event-gap ignore");
+        break;
+      }
+
+      if (!priv->group_done) {
+        GstClockReturn cret;
+
+        cret = sink_wait_clock (sink, wait_end);
+        priv->eos_end_time = wait_end;
+        GST_DEBUG_OBJECT (sink, "event-gap wait %d", cret);
+      } else {
+        if (wait_end < priv->eos_end_time) {
+          GST_DEBUG_OBJECT (sink, "event-gap ignore %llu < %llu", wait_end, priv->eos_end_time);
+        } else {
+          GST_DEBUG_OBJECT (sink, "sleep %d", (gint)(duration / 1000));
+          usleep(duration / 1000);
+          priv->eos_end_time = wait_end;
+        }
+      }
       break;
     }
     default:
