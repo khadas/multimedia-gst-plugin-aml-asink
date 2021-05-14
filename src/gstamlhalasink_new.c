@@ -1603,7 +1603,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       }
 
       /* if audio stop in the middle, do not touch clock and
-       * let vidoe finish. Event GAP will update eos_end_time
+       * let video finish. Event GAP will update eos_end_time
        */
       if (GST_CLOCK_TIME_IS_VALID(priv->eos_end_time)
               && (priv->eos_end_time - priv->eos_time) > GST_SECOND) {
@@ -1622,13 +1622,20 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     case GST_EVENT_GAP:
     {
       GstClockTime timestamp, duration, wait_end;
+      gint64 end_time = GST_CLOCK_TIME_NONE;
 
       gst_event_parse_gap (event, &timestamp, &duration);
       wait_end = timestamp + duration;
 
+      if (GST_CLOCK_TIME_IS_VALID(priv->segment.stop))
+        end_time = priv->segment.stop;
+      else if (GST_CLOCK_TIME_IS_VALID(priv->segment.duration))
+        end_time = priv->segment.start + priv->segment.duration;
+
       if (!GST_CLOCK_TIME_IS_VALID(duration) ||
               !GST_CLOCK_TIME_IS_VALID(timestamp) ||
-              wait_end > priv->segment.start + priv->segment.duration) {
+              !GST_CLOCK_TIME_IS_VALID(end_time) ||
+              wait_end > end_time) {
         GST_DEBUG_OBJECT (sink, "event-gap ignore");
         break;
       }
@@ -1640,7 +1647,8 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         priv->eos_end_time = wait_end;
         GST_DEBUG_OBJECT (sink, "event-gap wait %d", cret);
       } else {
-        if (wait_end < priv->eos_end_time) {
+        if (GST_CLOCK_TIME_IS_VALID(priv->eos_end_time) &&
+                wait_end < priv->eos_end_time) {
           GST_DEBUG_OBJECT (sink, "event-gap ignore %llu < %llu", wait_end, priv->eos_end_time);
         } else {
           GST_DEBUG_OBJECT (sink, "sleep %d", (gint)(duration / 1000));
@@ -2706,8 +2714,6 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
     return FALSE;
   }
 
-  priv->stream_->pause(priv->stream_);
-
   ret = priv->stream_->flush(priv->stream_);
   if (ret) {
     GST_ERROR_OBJECT (sink, "pause failure:%d", ret);
@@ -2866,7 +2872,7 @@ static int parse_bit_stream(GstAmlHalAsink *sink,
     priv->sr_ = info.frame_rate;
     priv->spec.info.rate = priv->sr_;
     priv->sync_frame = info.sync_frame;
-    GST_INFO_OBJECT (sink, "sr:%d spf:%d sync:%d",
+    GST_DEBUG_OBJECT (sink, "sr:%d spf:%d sync:%d",
       priv->sr_, priv->sample_per_frame, priv->sync_frame);
     return 0;
   }
