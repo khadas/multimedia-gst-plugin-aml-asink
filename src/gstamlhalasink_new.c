@@ -179,6 +179,7 @@ struct _GstAmlHalAsinkPrivate
   GstBuffer *start_buf; /* pcr master mode only */
   gboolean start_buf_sent;
   gboolean seamless_switch;
+  gboolean tempo_disable; /* disable tempo use */
 };
 
 enum
@@ -218,6 +219,7 @@ enum
   PROP_AVSYNC_SESSION,
   PROP_WAIT_FOR_VIDEO,
   PROP_SEAMLESS_SWITCH,
+  PROP_DISABLE_TEMPO_STRETCH,
   PROP_LAST
 };
 
@@ -440,6 +442,12 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       PROP_SEAMLESS_SWITCH,
       g_param_spec_boolean ("seamless-switch", "Seamless switch audio",
           "Seamless switch audio channels on different formats", FALSE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class,
+      PROP_DISABLE_TEMPO_STRETCH,
+      g_param_spec_boolean ("disable-tempo-stretch",
+          "Disable tempo stretch", "Disable the tempo stretch process", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
@@ -1047,7 +1055,17 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
            av_sync_set_audio_switch(priv->avsync, priv->seamless_switch);
       }
       break;
-
+    case PROP_DISABLE_TEMPO_STRETCH:
+      priv->tempo_disable = g_value_get_boolean(value);
+      GST_WARNING_OBJECT (sink, "disable tempo stretch:%d", priv->tempo_disable);
+      if (priv->tempo_used && priv->tempo_disable) {
+        GST_OBJECT_LOCK (sink);
+        GST_DEBUG_OBJECT (sink, "disable scaletempo");
+        scaletempo_stop (&priv->st);
+        priv->tempo_used = FALSE;
+        GST_OBJECT_UNLOCK (sink);
+      }
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -1221,11 +1239,12 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   /* We need to resync since the ringbuffer restarted */
   gst_aml_hal_asink_reset_sync (sink, FALSE);
 
-  if (is_raw_type(spec->type) && priv->direct_mode_) {
+  if (is_raw_type(spec->type) && priv->direct_mode_ && !priv->tempo_disable) {
     priv->tempo_used = TRUE;
     scaletempo_start (&priv->st);
     scaletempo_set_info (&priv->st, &spec->info);
-  }
+  } else if (priv->tempo_disable)
+    priv->tempo_used = FALSE;
 
   gst_element_post_message (GST_ELEMENT_CAST (bsink),
       gst_message_new_latency (GST_OBJECT (bsink)));
