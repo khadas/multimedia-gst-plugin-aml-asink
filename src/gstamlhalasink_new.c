@@ -1192,6 +1192,31 @@ parse_error:
   }
 }
 
+static gboolean caps_not_changed(GstAmlHalAsink *sink, GstCaps * cur, GstCaps * new)
+{
+  gboolean ret = FALSE;
+  GstAudioRingBufferSpec new_spec;
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  GstAudioRingBufferSpec *cur_spec = &priv->spec;
+
+  if (gst_caps_is_equal (cur, new))
+    return TRUE;
+
+  memset(&new_spec, 0, sizeof(new_spec));
+  if (!parse_caps (&new_spec, new))
+    return FALSE;
+
+  /* audio hal can handle the change for eac3 */
+  if (cur_spec->type == new_spec.type &&
+          cur_spec->type == GST_AUDIO_RING_BUFFER_FORMAT_TYPE_EAC3) {
+    GST_DEBUG_OBJECT (sink, "ignore eac3 format change");
+    ret = TRUE;
+  }
+
+  gst_caps_replace (&new_spec.caps, NULL);
+  return ret;
+}
+
 static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
 {
   GstAmlHalAsink *sink = GST_AML_HAL_ASINK (bsink);
@@ -1200,7 +1225,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
 
   spec = &priv->spec;
 
-  if (G_UNLIKELY (spec->caps && gst_caps_is_equal (spec->caps, caps))) {
+  if (G_UNLIKELY (spec->caps && caps_not_changed (sink, spec->caps, caps))) {
     GST_DEBUG_OBJECT (sink,
         "caps haven't changed, skipping reconfiguration");
     return TRUE;
@@ -1235,9 +1260,6 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
     priv->stream_volume_pending = FALSE;
     gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume);
   }
-
-  /* We need to resync since the ringbuffer restarted */
-  gst_aml_hal_asink_reset_sync (sink, FALSE);
 
   if (is_raw_type(spec->type) && priv->direct_mode_ && !priv->tempo_disable) {
     priv->tempo_used = TRUE;
