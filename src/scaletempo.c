@@ -261,6 +261,7 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
   GstMapInfo omap;
   guint64 timestamp;
   guint offset_out = 0;
+  guint64 offset_out_pts = 0;
 
   gst_buffer_map (outbuf, &omap, GST_MAP_WRITE);
   pout = (gint8 *) omap.data;
@@ -302,7 +303,17 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
     gst_util_uint64_scale (bytes_out, GST_SECOND,
     st->bytes_per_frame * st->sample_rate);
   offset_out = bytes_out * st->scale + st->bytes_queued - gst_buffer_get_size (inbuf);
-  timestamp = GST_BUFFER_TIMESTAMP (inbuf) - gst_util_uint64_scale (offset_out, GST_SECOND, st->bytes_per_frame * st->sample_rate);;
+  offset_out_pts = gst_util_uint64_scale (offset_out, GST_SECOND, st->bytes_per_frame * st->sample_rate);
+
+  if (offset_out_pts > GST_BUFFER_TIMESTAMP (inbuf))
+    timestamp = 0;
+  else
+    timestamp = GST_BUFFER_TIMESTAMP (inbuf) - offset_out_pts;
+
+  GST_TRACE ("offset_out %d bytes_out %d queued %d slide %d max %d, input size:%d, inputpts:%lld, outpts:%lld",
+         offset_out, bytes_out, st->bytes_queued,
+         st->bytes_to_slide, st->bytes_queue_max, gst_buffer_get_size (inbuf), GST_BUFFER_TIMESTAMP (inbuf), timestamp);
+
   GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
   gst_buffer_set_size (outbuf, bytes_out);
 
