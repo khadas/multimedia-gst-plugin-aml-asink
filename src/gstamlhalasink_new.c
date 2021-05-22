@@ -1880,8 +1880,9 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   time = GST_BUFFER_TIMESTAMP (buf);
 
-  if (!GST_CLOCK_TIME_IS_VALID (time) ||
-      (priv->last_ts != GST_CLOCK_TIME_NONE && priv->last_ts == time)) {
+  if ((!GST_CLOCK_TIME_IS_VALID (time) ||
+      (priv->last_ts != GST_CLOCK_TIME_NONE && priv->last_ts == time)) &&
+      is_raw_type(priv->spec.type)) {
     time = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, rate);
     GST_LOG_OBJECT (sink, "fake time %" GST_TIME_FORMAT, GST_TIME_ARGS (time));
   }
