@@ -1926,6 +1926,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
   }
 
+  GST_OBJECT_LOCK (sink);
   if (priv->tempo_used) {
     GstBuffer *outbuffer = NULL;
     gsize insize, outsize;
@@ -1938,16 +1939,23 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     if (!outbuffer) {
       GST_ERROR_OBJECT (sink, "out buffer fail %d", outsize);
       ret = GST_FLOW_ERROR;
-      gst_buffer_unref (buf);
+      GST_OBJECT_UNLOCK (sink);
       goto done;
     }
     gst_buffer_copy_into (outbuffer, buf, GST_BUFFER_COPY_METADATA, 0, -1);
 
-    scaletempo_transform (&priv->st, buf, outbuffer);
+    ret = scaletempo_transform (&priv->st, buf, outbuffer);
     gst_buffer_unref (buf);
+
+    if (ret != GST_FLOW_OK) {
+      GST_OBJECT_UNLOCK (sink);
+      GST_LOG_OBJECT (sink, "transform fail");
+      goto done;
+    }
 
     buf = outbuffer;
     if (!gst_buffer_get_size(buf)) {
+      GST_OBJECT_UNLOCK (sink);
       GST_LOG_OBJECT (sink, "skip length 0 buff");
       goto done;
     }
@@ -1979,6 +1987,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     g_mutex_unlock(&priv->feed_lock);
     goto done;
   }
+  GST_OBJECT_UNLOCK (sink);
 
   if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
       /* ms12 2.4 needs 2 frames to decode immediately */
