@@ -165,11 +165,19 @@ reinit_buffers (struct scale_tempo * st)
     st->bytes_standing = st->bytes_stride - st->bytes_overlap;
     st->samples_standing = st->bytes_standing / st->bytes_per_sample;
     st->buf_overlap = g_realloc (st->buf_overlap, st->bytes_overlap);
+    if (!st->buf_overlap) {
+      GST_ERROR("OOM");
+      return;
+    }
     /* S16 uses gint32 blend table, floats/doubles use their respective type */
     st->table_blend =
         g_realloc (st->table_blend,
         st->samples_overlap * (st->format ==
             GST_AUDIO_FORMAT_S16 ? 4 : st->bytes_per_sample));
+    if (!st->table_blend) {
+      GST_ERROR("OOM");
+      return;
+    }
     if (st->bytes_overlap > prev_overlap) {
       memset ((guint8 *) st->buf_overlap + prev_overlap, 0,
           st->bytes_overlap - prev_overlap);
@@ -236,6 +244,10 @@ reinit_buffers (struct scale_tempo * st)
 
   st->bytes_queue_max = new_size;
   st->buf_queue = g_realloc (st->buf_queue, st->bytes_queue_max);
+  if (!st->buf_queue) {
+    GST_ERROR("OOM");
+    return;
+  }
 
   st->bytes_stride_scaled = st->bytes_stride * st->scale;
   st->frames_stride_scaled = st->bytes_stride_scaled / st->bytes_per_frame;
@@ -263,7 +275,10 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
   guint offset_out = 0;
   guint64 offset_out_pts = 0;
 
-  gst_buffer_map (outbuf, &omap, GST_MAP_WRITE);
+  if (!gst_buffer_map (outbuf, &omap, GST_MAP_WRITE)) {
+    GST_ERROR ("map buffer fail");
+    return GST_FLOW_ERROR;
+  }
   pout = (gint8 *) omap.data;
   bytes_out = omap.size;
 
