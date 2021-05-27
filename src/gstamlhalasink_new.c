@@ -184,13 +184,6 @@ struct _GstAmlHalAsinkPrivate
 
 enum
 {
-  SYNC_AMASTER = 0,
-  SYNC_PCR_MASTER = 1,
-  SYNC_IPTV = 2,
-};
-
-enum
-{
   GAP_IDLE,
   GAP_MUTING_1,
   GAP_MUTING_2,
@@ -630,8 +623,8 @@ static gboolean
 get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
-  pts90K pcr = 0;
-  gint64 timepassed_90k, timepassed;
+  pts90K pcr = 0, timepassed_90k;
+  gint64 timepassed;
   int rc;
 
   if (priv->group_done) {
@@ -670,28 +663,35 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
   } else if ((int)pcr < 0 && (int)priv->first_pts >= 0 &&
-                priv->sync_mode == SYNC_AMASTER) {
+                priv->sync_mode == AV_SYNC_MODE_AMASTER) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
   }
 
-  if (priv->last_pcr > 0xF0000000 && pcr < 10*PTS_90K) {
-    priv->wrapping_time++;
-    GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
+  if (priv->sync_mode != AV_SYNC_MODE_PCR_MASTER) {
+    /* for live streaming need to consider PTS wrapping */
+    if (priv->last_pcr > 0xF0000000 && pcr < 10*PTS_90K) {
+      priv->wrapping_time++;
+      GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
+    }
+    priv->last_pcr = pcr;
+
+    if (priv->wrapping_time <= 1)
+      timepassed_90k = (int)(pcr - priv->first_pts);
+    else
+      timepassed_90k = (int)(pcr - priv->first_pts) +
+              (priv->wrapping_time - 1) * 0xFFFFFFFFLL;
+
+    timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
+    if (priv->segment.start != priv->segment.position &&
+            priv->segment.position != GST_CLOCK_TIME_NONE)
+      *cur = priv->segment.position + timepassed;
+    else
+      *cur = priv->segment.time + timepassed;
+  } else {
+    timepassed = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
+    *cur = timepassed;
   }
-  priv->last_pcr = pcr;
-
-  if (priv->wrapping_time <= 1)
-    timepassed_90k = (int)(pcr - priv->first_pts);
-  else
-    timepassed_90k = (int)(pcr - priv->first_pts) + (priv->wrapping_time-1)*0xFFFFFFFFLL;
-
-  timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
-  if (priv->segment.start != priv->segment.position &&
-        priv->segment.position != GST_CLOCK_TIME_NONE)
-    *cur = priv->segment.position + timepassed;
-  else
-    *cur = priv->segment.time + timepassed;
 
   GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT " pcr: %u",
                   GST_TIME_ARGS (*cur), pcr);
@@ -2086,7 +2086,7 @@ commit_done:
 
 #ifdef ENABLE_XRUN_DETECTION
   GST_OBJECT_LOCK (sink);
-  if (priv->sync_mode == SYNC_AMASTER &&
+  if (priv->sync_mode == AV_SYNC_MODE_AMASTER &&
         priv->stream_ && !priv->xrun_thread &&
         !priv->disable_xrun && start_xrun_thread (sink)) {
     ret = GST_FLOW_ERROR;
