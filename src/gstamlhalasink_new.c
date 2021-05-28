@@ -1966,6 +1966,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
      * playback, the time will be 1/2 of real time.
      */
   }
+  GST_OBJECT_UNLOCK (sink);
   //for those no bit stream parsed format EAC3 DTS render samples as buffers
   // otherwise position always return the start position.
   if (samples == 0)
@@ -1988,7 +1989,6 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     g_mutex_unlock(&priv->feed_lock);
     goto done;
   }
-  GST_OBJECT_UNLOCK (sink);
 
   if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
       /* ms12 2.4 needs 2 frames to decode immediately */
