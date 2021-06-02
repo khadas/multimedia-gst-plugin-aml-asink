@@ -662,7 +662,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   if (pcr == -1) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
-  } else if ((int)pcr < 0 && (int)priv->first_pts >= 0 &&
+  } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
                 priv->sync_mode == AV_SYNC_MODE_AMASTER) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
@@ -879,7 +879,7 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
   if (pcr == -1) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
-  } else if ((int)pcr < 0 && (int)priv->first_pts >= 0 &&
+  } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
                 priv->sync_mode == AV_SYNC_MODE_AMASTER) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
