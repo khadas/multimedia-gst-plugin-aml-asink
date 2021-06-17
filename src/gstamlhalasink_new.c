@@ -1006,14 +1006,19 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       guint mode = g_value_get_uint (value);
 
       priv->sync_mode = g_value_get_uint (value);
-      if (mode == 0)
+      if (mode == 0) {
         priv->sync_mode = AV_SYNC_MODE_AMASTER;
-      else if (mode == 1)
+      } else if (mode == 1) {
         priv->sync_mode = AV_SYNC_MODE_PCR_MASTER;
-      else if (mode == 2)
+        priv->tempo_used = FALSE;
+        priv->tempo_disable = TRUE;
+      } else if (mode == 2) {
         priv->sync_mode = AV_SYNC_MODE_IPTV;
-      else
+        priv->tempo_used = FALSE;
+        priv->tempo_disable = TRUE;
+      } else {
         GST_ERROR_OBJECT (sink, "invalid sync mode %d", mode);
+      }
 
       GST_DEBUG_OBJECT (sink, "sync mode:%d", priv->sync_mode);
       break;
