@@ -1249,6 +1249,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   GST_OBJECT_LOCK (sink);
   hal_pause (sink);
   hal_release (sink);
+  priv->flushing_ = FALSE;
   GST_OBJECT_UNLOCK (sink);
 
   GST_DEBUG_OBJECT (sink, "parse caps");
@@ -1267,6 +1268,18 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
     goto acquire_error;
   }
   GST_OBJECT_UNLOCK (sink);
+
+  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+    char setting[20];
+    priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+    if (!priv->avsync) {
+      GST_ERROR_OBJECT (sink, "create av sync fail");
+      return FALSE;
+    }
+    /* set session into hwsync id */
+    snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
+    priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+  }
 
   if (priv->stream_volume_pending) {
     priv->stream_volume_pending = FALSE;
@@ -1750,17 +1763,15 @@ done:
   /* ERRORS */
 flushing:
   {
-    GST_DEBUG_OBJECT (sink, "we are flushing");
+    GST_DEBUG_OBJECT (sink, "we are flushing ignore %" GST_PTR_FORMAT, event);
     gst_event_unref (event);
-    result = FALSE;
     goto done;
   }
 
 after_eos:
   {
-    GST_DEBUG_OBJECT (sink, "Event received after EOS, dropping");
+    GST_DEBUG_OBJECT (sink, "Event received after EOS, dropping %" GST_PTR_FORMAT, event);
     gst_event_unref (event);
-    result = FALSE;
     goto done;
   }
 }
