@@ -892,7 +892,7 @@ done:
 }
 
 static void
-gst_aml_hal_sink_set_stream_volume (GstAmlHalAsink * sink, float vol)
+gst_aml_hal_sink_set_stream_volume (GstAmlHalAsink * sink, float vol, gboolean force)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
   int ret;
@@ -903,6 +903,9 @@ gst_aml_hal_sink_set_stream_volume (GstAmlHalAsink * sink, float vol)
     priv->stream_volume = vol;
     return;
   }
+
+  if (!force && vol == priv->stream_volume)
+    return;
 
   ret = priv->stream_->set_volume (priv->stream_, vol, vol);
   if (ret)
@@ -995,7 +998,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     case PROP_STREAM_VOLUME:
     {
       float vol = g_value_get_double (value);
-      gst_aml_hal_sink_set_stream_volume (sink, vol);
+      gst_aml_hal_sink_set_stream_volume (sink, vol, false);
       break;
     }
     case PROP_MUTE:
@@ -1249,6 +1252,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   GST_OBJECT_LOCK (sink);
   hal_pause (sink);
   hal_release (sink);
+  priv->flushing_ = FALSE;
   GST_OBJECT_UNLOCK (sink);
 
   GST_DEBUG_OBJECT (sink, "parse caps");
@@ -1268,9 +1272,21 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   }
   GST_OBJECT_UNLOCK (sink);
 
+  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+    char setting[20];
+    priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+    if (!priv->avsync) {
+      GST_ERROR_OBJECT (sink, "create av sync fail");
+      return FALSE;
+    }
+    /* set session into hwsync id */
+    snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
+    priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+  }
+
   if (priv->stream_volume_pending) {
     priv->stream_volume_pending = FALSE;
-    gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume);
+    gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume, true);
   }
 
   if (is_raw_type(spec->type) && priv->direct_mode_ && !priv->tempo_disable) {
@@ -1750,17 +1766,15 @@ done:
   /* ERRORS */
 flushing:
   {
-    GST_DEBUG_OBJECT (sink, "we are flushing");
+    GST_DEBUG_OBJECT (sink, "we are flushing ignore %" GST_PTR_FORMAT, event);
     gst_event_unref (event);
-    result = FALSE;
     goto done;
   }
 
 after_eos:
   {
-    GST_DEBUG_OBJECT (sink, "Event received after EOS, dropping");
+    GST_DEBUG_OBJECT (sink, "Event received after EOS, dropping %" GST_PTR_FORMAT, event);
     gst_event_unref (event);
-    result = FALSE;
     goto done;
   }
 }
@@ -1955,6 +1969,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
     ret = scaletempo_transform (&priv->st, buf, outbuffer);
     gst_buffer_unref (buf);
+    buf = outbuffer;
 
     if (ret != GST_FLOW_OK) {
       GST_OBJECT_UNLOCK (sink);
@@ -1962,8 +1977,9 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       goto done;
     }
 
-    buf = outbuffer;
     if (!gst_buffer_get_size(buf)) {
+      /* lenth 0 can not be commited */
+      priv->render_samples += samples;
       GST_OBJECT_UNLOCK (sink);
       GST_LOG_OBJECT (sink, "skip length 0 buff");
       goto done;
@@ -2790,6 +2806,11 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
   GST_DEBUG_OBJECT (sink, "stop");
 
   if (priv->avsync) {
+    /* if session is still alive, recover mode for next playback */
+    if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+      GST_INFO_OBJECT(sink, "recover avsync mode");
+      av_sync_change_mode (priv->avsync, AV_SYNC_MODE_PCR_MASTER);
+    }
     av_sync_destroy (priv->avsync);
     priv->avsync = NULL;
   }
