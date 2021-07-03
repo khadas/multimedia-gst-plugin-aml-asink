@@ -126,6 +126,7 @@ struct _GstAmlHalAsinkPrivate
   guint wrapping_time;
   uint32_t last_pcr;
   uint32_t first_pts;
+  guint64  first_pts_64;
   gboolean first_pts_set;
 
   GstSegment segment;
@@ -673,7 +674,10 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   int rc;
 
   if (priv->group_done) {
-    *cur = priv->eos_end_time;
+    /* return a little bigger time for basesink of other module
+     * to behavior correctly. basink assume clock keeps
+     * going to exit wait loop */
+    *cur = priv->eos_end_time + 100 * GST_MSECOND;
     return TRUE;
   }
 
@@ -728,11 +732,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
               (priv->wrapping_time - 1) * 0xFFFFFFFFLL;
 
     timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
-    if (priv->segment.start != priv->segment.position &&
-            priv->segment.position != GST_CLOCK_TIME_NONE)
-      *cur = priv->segment.position + timepassed;
-    else
-      *cur = priv->segment.time + timepassed;
+    *cur = priv->first_pts_64 + timepassed;
   } else {
     timepassed = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
     *cur = timepassed;
@@ -895,45 +895,11 @@ static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts)
  * reasons. Try hard to not deal with and invalid ringbuffer and rate. */
 static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink * sink)
 {
-  GstClockTime result = GST_CLOCK_TIME_NONE;
-  GstAmlHalAsinkPrivate *priv = sink->priv;
-  pts90K pcr = 0;
-  int rc;
+  gint64 position = GST_CLOCK_TIME_NONE;
 
-  if (priv->group_done) {
-    /* return a little bigger time for basesink of other module
-     * to behavior correctly. basink assume clock keeps
-     * going to exit wait loop */
-    result = priv->eos_end_time + 100 * GST_MSECOND;
-    goto done;
-  }
-
-  if (!priv->render_samples)
-    goto done;
-
-  if (!priv->direct_mode_) {
-    //TODO(song): get HAL render position
-    result = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
-    goto done;
-  }
-
-  rc = avsync_get_time(sink, &pcr);
-  if (rc)
-    goto done;
-
-  if (pcr == -1) {
-    pcr = priv->first_pts;
-    GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
-  } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
-                priv->sync_mode == AV_SYNC_MODE_AMASTER) {
-    pcr = priv->first_pts;
-    GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
-  }
-  result = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
-
-done:
-  GST_LOG_OBJECT (sink, "time %" GST_TIME_FORMAT " 0x%x", GST_TIME_ARGS (result), pcr);
-  return result;
+  get_position (sink, GST_FORMAT_TIME, &position);
+  GST_LOG_OBJECT (sink, "time %" GST_TIME_FORMAT, GST_TIME_ARGS (position));
+  return position;
 }
 
 static void
@@ -2047,10 +2013,8 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     uint32_t pts_32 = gst_util_uint64_scale_int (time, PTS_90K, GST_SECOND);
 
     priv->first_pts_set = TRUE;
-    if (priv->segment.start)
-      priv->first_pts = pts_32;
-    else
-      priv->first_pts = 0;
+    priv->first_pts_64 = time;
+    priv->first_pts = pts_32;
     GST_INFO_OBJECT(sink, "update first PTS %x", pts_32);
   }
 
