@@ -180,6 +180,14 @@ struct _GstAmlHalAsinkPrivate
   gboolean start_buf_sent;
   gboolean seamless_switch;
   gboolean tempo_disable; /* disable tempo use */
+
+#ifdef ENABLE_MS12
+  /* ac4 config */
+  int ac4_pres_group_idx;
+  int ac4_pat;
+  gchar *ac4_lang;
+  gchar *ac4_lang2;
+#endif
 };
 
 enum
@@ -213,6 +221,13 @@ enum
   PROP_WAIT_FOR_VIDEO,
   PROP_SEAMLESS_SWITCH,
   PROP_DISABLE_TEMPO_STRETCH,
+#ifdef ENABLE_MS12
+  /* AC4 config */
+  PROP_AC4_P_GROUP_IDX,
+  PROP_AC4_LANG_1,
+  PROP_AC4_LANG_2,
+  PROP_AC4_AUTO_S_PRI,
+#endif
   PROP_LAST
 };
 
@@ -447,6 +462,27 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Disable tempo stretch", "Disable the tempo stretch process", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+#ifdef ENABLE_MS12
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AC4_P_GROUP_IDX,
+      g_param_spec_int ("ac4-presentation-group-index", "ac4 presentation group index",
+        "Presentation group index to be decoded. Overrides the presentation selection by preferred language and associated type 0...%d: Presentation group index -1:  Switch back to automatic selection by language and associated type (default)",
+        -1, G_MAXINT, -1, G_PARAM_WRITABLE));
+
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AC4_AUTO_S_PRI,
+      g_param_spec_string ("ac4-auto-selection-priority", "ac4 auto selection priority",
+        "language: Prefer selection by language associated_type: Prefer selection by associated type (default)", "associated_type", G_PARAM_WRITABLE));
+
+  g_object_class_install_property (gobject_class, PROP_AC4_LANG_1,
+      g_param_spec_string  ("ac4-preferred-lang1", "ac4 preferred lang1",
+        "1st Preferred Language code (3 Letter ISO 639)",
+        "null", G_PARAM_WRITABLE));
+
+  g_object_class_install_property (gobject_class, PROP_AC4_LANG_2,
+      g_param_spec_string  ("ac4-preferred-lang2", "ac4 preferred lang2",
+        "2nd Preferred Language code (3 Letter ISO 639)",
+        "null", G_PARAM_WRITABLE));
+#endif
+
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
       (GSignalFlags) (G_SIGNAL_RUN_LAST),
@@ -539,6 +575,11 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->sync_mode = AV_SYNC_MODE_AMASTER;
   priv->session_id = -1;
   priv->stream_volume = 1.0;
+#ifdef ENABLE_MS12
+  priv->ac4_pat = -1;
+  priv->ac4_pres_group_idx = -2;
+  priv->ac4_lang = priv->ac4_lang2 = NULL;
+#endif
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
@@ -575,6 +616,10 @@ gst_aml_hal_asink_dispose (GObject * object)
 
   g_mutex_clear (&priv->feed_lock);
   g_cond_clear (&priv->run_ready);
+#ifdef ENABLE_MS12
+  g_free (priv->ac4_lang);
+  g_free (priv->ac4_lang2);
+#endif
   g_free (priv->log_path);
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }
@@ -1086,6 +1131,49 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         GST_OBJECT_UNLOCK (sink);
       }
       break;
+#ifdef ENABLE_MS12
+    case PROP_AC4_P_GROUP_IDX:
+      priv->ac4_pres_group_idx = g_value_get_int(value);
+      GST_WARNING_OBJECT (sink, "ac4_pres_group_idx:%d", priv->ac4_pres_group_idx);
+      break;
+    case PROP_AC4_AUTO_S_PRI:
+    {
+      const gchar *pri = g_value_get_string (value);
+      if (!strncmp ("language", pri, sizeof ("language")))
+        priv->ac4_pat = 0;
+      else if (!strncmp ("associated_type", pri, sizeof ("associated_type")))
+        priv->ac4_pat = 1;
+      else
+        GST_ERROR_OBJECT (sink, "invalid value:%s", pri);
+      if (priv->ac4_pat != -1)
+        GST_WARNING_OBJECT (sink, "ac4_pat:%d", priv->ac4_pat);
+      break;
+    }
+    case PROP_AC4_LANG_1:
+      if (priv->ac4_lang)
+        g_free(priv->ac4_lang);
+      priv->ac4_lang = g_value_dup_string (value);
+      if (strlen(priv->ac4_lang) != 3) {
+        GST_ERROR_OBJECT (sink, "warong ac4_lang:%s", priv->ac4_lang);
+        g_free(priv->ac4_lang);
+        priv->ac4_lang = NULL;
+        break;
+      }
+      GST_WARNING_OBJECT (sink, "ac4_lang:%s", priv->ac4_lang);
+      break;
+    case PROP_AC4_LANG_2:
+      if (priv->ac4_lang2)
+        g_free(priv->ac4_lang2);
+      if (strlen(priv->ac4_lang2) != 3) {
+        GST_ERROR_OBJECT (sink, "warong ac4_lang2:%s", priv->ac4_lang2);
+        g_free(priv->ac4_lang2);
+        priv->ac4_lang2 = NULL;
+        break;
+      }
+      priv->ac4_lang2 = g_value_dup_string (value);
+      GST_WARNING_OBJECT (sink, "ac4_lang2:%s", priv->ac4_lang2);
+      break;
+#endif
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -2637,6 +2725,31 @@ aml_open_output_stream (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
     GST_ERROR_OBJECT(sink, "can not open output stream:%d", ret);
     return FALSE;
   }
+
+#ifdef ENABLE_MS12
+  if (priv->format_ == AUDIO_FORMAT_AC4)
+  {
+    char setting[50];
+    /*ac4 setting */
+    if (priv->ac4_lang) {
+      snprintf(setting, sizeof(setting), "ms12_runtime=-lang %s", priv->ac4_lang);
+      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+    }
+    if (priv->ac4_lang2) {
+      snprintf(setting, sizeof(setting), "ms12_runtime=-lang2 %s", priv->ac4_lang2);
+      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+    }
+    if (priv->ac4_pat != -1) {
+      snprintf(setting, sizeof(setting), "ms12_runtime=-pat %d", priv->ac4_pat);
+      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+    }
+    if (priv->ac4_pres_group_idx != -2) {
+      snprintf(setting, sizeof(setting), "ms12_runtime=-ac4_pres_group_idx %d", priv->ac4_pres_group_idx);
+      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+    }
+  }
+#endif
+
   GST_DEBUG_OBJECT (sink, "done");
   return TRUE;
 }
