@@ -95,6 +95,15 @@ AC_ARG_ENABLE([ms12],
 esac],[ms12=false])
 AM_CONDITIONAL([MS12], [test x${ms12} = xtrue])
 
+AC_ARG_ENABLE([DTS],
+[  --enable-dts audio HAL is using dtsdecocder],
+[case "${enableval}" in
+  yes) dts=true ;;
+  no)  dts=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-dts]) ;;
+esac],[dts=false])
+AM_CONDITIONAL([DTS], [test x${dts} = xtrue])
+
 AC_ARG_ENABLE([essos-rm],
 [  --enable-essos-rm Use essos for resource managing],
 [case "${enableval}" in

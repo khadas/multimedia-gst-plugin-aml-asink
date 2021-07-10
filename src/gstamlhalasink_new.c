@@ -266,6 +266,11 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 #ifdef ENABLE_MS12
       "audio/mpeg, mpegversion=4, stream-format=(string){loas}; "
 #endif
+#ifdef ENABLE_DTS
+      "audio/x-dts; "
+      "audio/x-gst-fourcc-dtse;"
+      "audio/x-dtsl;"
+#endif
       )
     );
 
@@ -1288,6 +1293,16 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     if (!gst_structure_get_int (structure, "channels", &info.channels))
         info.channels = 2;
     spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_MPEG4_AAC;
+    info.bpf = 1;
+  } else if (g_str_equal (mimetype, "audio/x-dts")
+    || g_str_equal (mimetype, "audio/x-gst-fourcc-dtse")
+    || g_str_equal (mimetype, "audio/x-dtsl")) {
+    /* if cannot extract the needed information from the cap, set default value */
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+        info.rate = 48000;
+    if (!gst_structure_get_int (structure, "channels", &info.channels))
+        info.channels = 2;
+    spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_DTS;
     info.bpf = 1;
   } else {
     goto parse_error;
@@ -2684,6 +2699,9 @@ hal_parse_spec (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
       break;
     case GST_AUDIO_RING_BUFFER_FORMAT_TYPE_MPEG4_AAC:
       priv->format_ = AUDIO_FORMAT_HE_AAC_V2;
+      break;
+    case GST_AUDIO_RING_BUFFER_FORMAT_TYPE_DTS:
+      priv->format_ = AUDIO_FORMAT_DTS;
       break;
     default:
       goto error;

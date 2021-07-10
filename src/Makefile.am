@@ -36,6 +36,10 @@ if MS12
 libgstamlhalasink_la_CFLAGS += -DENABLE_MS12
 endif
 
+if DTS
+libgstamlhalasink_la_CFLAGS += -DENABLE_DTS
+endif
+
 if ESSOS
 libgstamlhalasink_la_CFLAGS += -DESSOS_RM
 libgstamlhalasink_la_LIBADD += -lessosrmgr
