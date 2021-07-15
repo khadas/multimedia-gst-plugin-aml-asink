@@ -1459,7 +1459,12 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink, GstClockTime time)
       ret = GST_CLOCK_UNSCHEDULED;
       break;
     }
-
+    if (priv->eos) {
+      GST_INFO_OBJECT (sink, "Already reach EOS no wait at time %lld now %lld",
+                       time, now);
+      ret = GST_CLOCK_OK;
+      break;
+    }
     if (now < time - GST_MSECOND) {
       if (priv->quit_clock_wait) {
         ret = GST_CLOCK_UNSCHEDULED;
@@ -1585,7 +1590,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     {
       GstMessage *message;
       GstFlowReturn ret;
-
+      GST_DEBUG_OBJECT (sink, "receive eos");
       priv->received_eos = TRUE;
       ret = sink_drain (sink);
       if (G_UNLIKELY (ret != GST_FLOW_OK)) {
@@ -1884,10 +1889,16 @@ static gpointer xrun_thread(gpointer para)
         usleep(10000);
         continue;
       }
-
-      GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-      hal_pause (sink);
-      g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+      if (priv->received_eos) {
+        GST_INFO_OBJECT (sink, "xrun timer reached EOS");
+        GST_OBJECT_LOCK (sink);
+        priv->eos = TRUE;
+        GST_OBJECT_UNLOCK (sink);
+      } else {
+        GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+        hal_pause (sink);
+        g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+      }
       g_timer_start(priv->xrun_timer);
       g_timer_stop(priv->xrun_timer);
 #else
