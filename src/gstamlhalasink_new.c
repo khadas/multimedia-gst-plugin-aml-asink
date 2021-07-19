@@ -177,6 +177,7 @@ struct _GstAmlHalAsinkPrivate
   int session_id;
   GstClock *provided_clock;
   gboolean wait_video;
+  int aligned_timeout;
   GstBuffer *start_buf; /* pcr master mode only */
   gboolean start_buf_sent;
   gboolean seamless_switch;
@@ -229,6 +230,7 @@ enum
   PROP_AC4_LANG_2,
   PROP_AC4_AUTO_S_PRI,
 #endif
+  PROP_A_WAIT_TIMEOUT,
   PROP_LAST
 };
 
@@ -484,6 +486,12 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
         "null", G_PARAM_WRITABLE));
 #endif
 
+  g_object_class_install_property (gobject_class,
+      PROP_A_WAIT_TIMEOUT,
+      g_param_spec_int ("a-wait-timeout", "audio timeout when video not come",
+          "audio wait for video timeout if no video comes, effective when wait-video property is true.",
+          -1, 10000, 0, G_PARAM_WRITABLE));
+
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
       (GSignalFlags) (G_SIGNAL_RUN_LAST),
@@ -581,6 +589,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->ac4_pres_group_idx = -2;
   priv->ac4_lang = priv->ac4_lang2 = NULL;
 #endif
+  priv->aligned_timeout = -1;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
@@ -1140,6 +1149,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       GST_WARNING_OBJECT (sink, "ac4_lang2:%s", priv->ac4_lang2);
       break;
 #endif
+    case PROP_A_WAIT_TIMEOUT:
+      priv->aligned_timeout = g_value_get_int(value);
+      GST_WARNING_OBJECT (sink, "timeout:%d", priv->aligned_timeout);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -1187,6 +1200,9 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       break;
     case PROP_SEAMLESS_SWITCH:
       g_value_set_boolean (value, priv->seamless_switch);
+      break;
+    case PROP_A_WAIT_TIMEOUT:
+      g_value_set_int (value, priv->aligned_timeout);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -1687,6 +1703,8 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       /* create avsync before rate change */
       if (!priv->avsync && priv->direct_mode_) {
         char setting[20];
+        struct start_policy policy;
+
          if (priv->seamless_switch) {
            priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
          } else {
@@ -1699,11 +1717,17 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         if (priv->seamless_switch)
         {
            GST_INFO_OBJECT (sink, "SET AVSYNC audio switch to ALIGN mode");
-           avs_sync_set_start_policy (priv->avsync, AV_SYNC_START_ALIGN);
+           policy.policy = AV_SYNC_START_ALIGN;
+           policy.timeout = -1;
+           avs_sync_set_start_policy (priv->avsync, &policy);
         }
 
-        if (priv->wait_video)
-          avs_sync_set_start_policy (priv->avsync, AV_SYNC_START_ALIGN);
+        if (priv->wait_video) {
+          policy.policy = AV_SYNC_START_ALIGN;
+          policy.timeout = priv->aligned_timeout;
+          GST_INFO_OBJECT (sink, "set policy=align,  timeout=%d", policy.timeout);
+          avs_sync_set_start_policy (priv->avsync, &policy);
+        }
         /* set session into hwsync id */
         snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
         priv->stream_->common.set_parameters (&priv->stream_->common, setting);
