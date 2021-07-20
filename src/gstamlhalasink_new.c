@@ -263,6 +263,9 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       "audio/x-eac3, "
       COMMON_AUDIO_CAPS "; "
       "audio/x-ac4; "
+#ifdef ENABLE_MS12
+      "audio/mpeg, mpegversion=4, stream-format=(string){loas}; "
+#endif
       )
     );
 
@@ -718,8 +721,13 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
       return FALSE;
 
   if (pcr == -1) {
-    pcr = priv->first_pts;
-    GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
+    if (priv->paused_) {
+      pcr = priv->last_pcr;
+      GST_LOG_OBJECT (sink, "paused, return last %u", pcr);
+    } else {
+      pcr = priv->first_pts;
+      GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
+    }
   } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
                 priv->sync_mode == AV_SYNC_MODE_AMASTER) {
     pcr = priv->first_pts;
@@ -1128,8 +1136,12 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       if (priv->ac4_lang)
         g_free(priv->ac4_lang);
       priv->ac4_lang = g_value_dup_string (value);
+      if (!priv->ac4_lang) {
+        GST_ERROR_OBJECT (sink, "can not get string");
+        break;
+      }
       if (strlen(priv->ac4_lang) != 3) {
-        GST_ERROR_OBJECT (sink, "warong ac4_lang:%s", priv->ac4_lang);
+        GST_ERROR_OBJECT (sink, "wrong ac4_lang:%s", priv->ac4_lang);
         g_free(priv->ac4_lang);
         priv->ac4_lang = NULL;
         break;
@@ -1139,13 +1151,17 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     case PROP_AC4_LANG_2:
       if (priv->ac4_lang2)
         g_free(priv->ac4_lang2);
+      priv->ac4_lang2 = g_value_dup_string (value);
+      if (!priv->ac4_lang2) {
+        GST_ERROR_OBJECT (sink, "can not get string");
+        break;
+      }
       if (strlen(priv->ac4_lang2) != 3) {
-        GST_ERROR_OBJECT (sink, "warong ac4_lang2:%s", priv->ac4_lang2);
+        GST_ERROR_OBJECT (sink, "wrong ac4_lang2:%s", priv->ac4_lang2);
         g_free(priv->ac4_lang2);
         priv->ac4_lang2 = NULL;
         break;
       }
-      priv->ac4_lang2 = g_value_dup_string (value);
       GST_WARNING_OBJECT (sink, "ac4_lang2:%s", priv->ac4_lang2);
       break;
 #endif
@@ -1265,6 +1281,14 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     gst_structure_get_int (structure, "channels", &info.channels);
     spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_DTS;
     info.bpf = 4;
+  } else if (g_str_equal (mimetype, "audio/mpeg")) {
+    /* if cannot extract the needed information from the cap, set default value */
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+        info.rate = 48000;
+    if (!gst_structure_get_int (structure, "channels", &info.channels))
+        info.channels = 2;
+    spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_MPEG4_AAC;
+    info.bpf = 1;
   } else {
     goto parse_error;
   }
@@ -1330,7 +1354,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   priv->flushing_ = FALSE;
   GST_OBJECT_UNLOCK (sink);
 
-  GST_DEBUG_OBJECT (sink, "parse caps");
+  GST_DEBUG_OBJECT (sink, "parse caps: %" GST_PTR_FORMAT, caps);
 
   spec->buffer_time = DEFAULT_BUFFER_TIME;
   spec->latency_time = DEFAULT_LATENCY_TIME;
@@ -2363,6 +2387,12 @@ static void essos_rm_init(GstAmlHalAsink *sink)
     }
   }
 }
+
+static void resMgrUpdateState(GstAmlHalAsinkPrivate *priv, EssRMgrResState state)
+{
+  if (priv->rm && priv->resAssignedId >= 0)
+    EssRMgrResourceSetState(priv->rm, EssRMgrResType_audioDecoder, priv->resAssignedId, state);
+}
 #endif
 
 static GstStateChangeReturn
@@ -2413,6 +2443,9 @@ gst_aml_hal_asink_change_state (GstElement * element,
         gst_element_post_message (element,
             gst_message_new_clock_provide (GST_OBJECT_CAST (element),
               priv->provided_clock, TRUE));
+#ifdef ESSOS_RM
+      resMgrUpdateState(priv, EssRMgrRes_paused);
+#endif
       break;
     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
     {
@@ -2421,7 +2454,9 @@ gst_aml_hal_asink_change_state (GstElement * element,
       GST_OBJECT_LOCK (sink);
       hal_start (sink);
       GST_OBJECT_UNLOCK (sink);
-
+#ifdef ESSOS_RM
+      resMgrUpdateState(priv, EssRMgrRes_active);
+#endif
       if (priv->eos) {
         GstMessage *message;
 
@@ -2452,13 +2487,18 @@ gst_aml_hal_asink_change_state (GstElement * element,
       bsink->have_preroll = 1;
       GST_BASE_SINK_PREROLL_UNLOCK (bsink);
       GST_OBJECT_UNLOCK (sink);
-
+#ifdef ESSOS_RM
+      resMgrUpdateState(priv, EssRMgrRes_paused);
+#endif
       break;
     }
     case GST_STATE_CHANGE_PAUSED_TO_READY:
     {
       GST_INFO_OBJECT(sink, "paused to ready");
       paused_to_ready (sink);
+#ifdef ESSOS_RM
+      resMgrUpdateState(priv, EssRMgrRes_idle);
+#endif
       break;
     }
     default:
@@ -2633,6 +2673,9 @@ hal_parse_spec (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
       break;
     case GST_AUDIO_RING_BUFFER_FORMAT_TYPE_EAC3:
       priv->format_ = AUDIO_FORMAT_E_AC3;
+      break;
+    case GST_AUDIO_RING_BUFFER_FORMAT_TYPE_MPEG4_AAC:
+      priv->format_ = AUDIO_FORMAT_HE_AAC_V2;
       break;
     default:
       goto error;
