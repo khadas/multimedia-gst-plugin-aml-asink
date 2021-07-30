@@ -1804,6 +1804,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         break;
       }
 
+      sink_drain (sink);
       GST_OBJECT_LOCK (sink);
       hal_stop (sink);
       priv->group_done = TRUE;
