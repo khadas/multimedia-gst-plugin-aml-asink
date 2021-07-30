@@ -1804,6 +1804,13 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         break;
       }
 
+      GST_OBJECT_LOCK (sink);
+      if (priv->xrun_timer) {
+        g_timer_stop (priv->xrun_timer);
+        priv->xrun_paused = false;
+      }
+      GST_OBJECT_UNLOCK (sink);
+
       sink_drain (sink);
       GST_OBJECT_LOCK (sink);
       hal_stop (sink);
