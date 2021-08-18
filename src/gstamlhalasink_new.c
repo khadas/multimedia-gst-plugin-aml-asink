@@ -1559,6 +1559,14 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
 
   GST_DEBUG_OBJECT (sink, "draining");
 
+  if (priv->segment.stop != -1 &&
+      priv->eos_time != -1 &&
+      priv->segment.stop - priv->eos_time > 2 * GST_SECOND) {
+    GST_DEBUG_OBJECT (sink, "refine eos from %llu to %llu",
+        priv->eos_time, priv->segment.stop);
+    priv->eos_time = priv->segment.stop;
+  }
+
   if (priv->eos_time != -1 && !priv->group_done) {
     GstClockReturn cret;
     GST_DEBUG_OBJECT (sink,
