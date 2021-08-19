@@ -95,7 +95,7 @@ AC_ARG_ENABLE([ms12],
 esac],[ms12=false])
 AM_CONDITIONAL([MS12], [test x${ms12} = xtrue])
 
-AC_ARG_ENABLE([DTS],
+AC_ARG_ENABLE([dts],
 [  --enable-dts audio HAL is using dtsdecocder],
 [case "${enableval}" in
   yes) dts=true ;;
