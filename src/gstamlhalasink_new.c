@@ -341,8 +341,7 @@ static GstFlowReturn gst_aml_hal_asink_wait_event(GstBaseSink * bsink,
     GstEvent * event);
 static void gst_aml_hal_asink_get_times(GstBaseSink * bsink,
     GstBuffer * buffer, GstClockTime * start, GstClockTime * end);
-static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink,
-    GstCaps * caps);
+static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink * sink, GstCaps * caps);
 
 static gboolean hal_open_device (GstAmlHalAsink * sink);
 static gboolean hal_close_device (GstAmlHalAsink* sink);
@@ -542,7 +541,6 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_provide_clock);
   gstelement_class->query = GST_DEBUG_FUNCPTR (gst_aml_hal_asink_query);
 
-  gstbasesink_class->set_caps = GST_DEBUG_FUNCPTR (gst_aml_hal_asink_setcaps);
   gstbasesink_class->wait_event =
       GST_DEBUG_FUNCPTR (gst_aml_hal_asink_wait_event);
   gstbasesink_class->get_times =
@@ -1346,9 +1344,8 @@ static gboolean caps_not_changed(GstAmlHalAsink *sink, GstCaps * cur, GstCaps * 
   return ret;
 }
 
-static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
+static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
 {
-  GstAmlHalAsink *sink = GST_AML_HAL_ASINK (bsink);
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GstAudioRingBufferSpec *spec;
 
@@ -1422,8 +1419,8 @@ static gboolean gst_aml_hal_asink_setcaps (GstBaseSink * bsink, GstCaps * caps)
   } else if (priv->tempo_disable)
     priv->tempo_used = FALSE;
 
-  gst_element_post_message (GST_ELEMENT_CAST (bsink),
-      gst_message_new_latency (GST_OBJECT (bsink)));
+  gst_element_post_message (GST_ELEMENT_CAST (sink),
+      gst_message_new_latency (GST_OBJECT (sink)));
 
   return TRUE;
 
@@ -1482,7 +1479,8 @@ static void gst_aml_hal_asink_get_times (GstBaseSink * bsink, GstBuffer * buffer
   *end = GST_CLOCK_TIME_NONE;
 }
 
-static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink, GstClockTime time)
+static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink,
+    GstClockTime time, GstClockTime duration)
 {
   GstClockReturn ret;
   GstClock *clock;
@@ -1499,6 +1497,14 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink, GstClockTime time)
   GstClockTime now = gst_aml_hal_asink_get_time (clock, sink);
   if (now == GST_CLOCK_TIME_NONE) {
     ret = GST_CLOCK_UNSCHEDULED;
+    goto exit;
+  }
+
+  if (!priv->render_samples &&
+      priv->sync_mode == AV_SYNC_MODE_AMASTER) {
+    /* clock not started yet */
+    usleep (GST_TIME_AS_USECONDS(duration));
+    ret = GST_CLOCK_OK;
     goto exit;
   }
 
@@ -1576,7 +1582,7 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
     hal_commit (sink, NULL, 0, -1);
     /* wait for the EOS time to be reached, this is the time when the last
      * sample is played. */
-    cret = sink_wait_clock (sink, priv->eos_time);
+    cret = sink_wait_clock (sink, priv->eos_time, 0);
 
     GST_INFO_OBJECT (sink, "drained ret: %d", cret);
     if (cret == GST_CLOCK_OK || cret == GST_CLOCK_EARLY)
@@ -1867,7 +1873,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       if (!priv->group_done) {
         GstClockReturn cret;
 
-        cret = sink_wait_clock (sink, wait_end);
+        cret = sink_wait_clock (sink, wait_end, duration);
         priv->eos_end_time = wait_end;
         GST_DEBUG_OBJECT (sink, "event-gap wait %d", cret);
       } else {
@@ -1879,6 +1885,19 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           usleep(duration / 1000);
           priv->eos_end_time = wait_end;
         }
+      }
+      break;
+    }
+    case GST_EVENT_CAPS:
+    {
+      GstCaps *caps = NULL;
+
+      gst_event_parse_caps (event, &caps);
+      if (caps) {
+        result = gst_aml_hal_asink_setcaps(sink, caps);
+        GST_DEBUG_OBJECT (sink, "set caps ret %d", result);
+      } else {
+        result = FALSE;
       }
       break;
     }
