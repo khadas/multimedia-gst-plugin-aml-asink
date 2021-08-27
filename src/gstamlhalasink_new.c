@@ -1458,6 +1458,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
   priv->gap_duration = 0;
   priv->gap_offset = 0;
   priv->quit_clock_wait = FALSE;
+  priv->group_done = FALSE;
   if (priv->start_buf) {
     gst_buffer_unref (priv->start_buf);
     priv->start_buf = NULL;
