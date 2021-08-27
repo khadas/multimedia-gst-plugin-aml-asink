@@ -1557,6 +1557,7 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GstFlowReturn ret = GST_FLOW_OK;
+  pts90K pcr;
 
   if (!priv->stream_)
     return ret;
@@ -1571,6 +1572,11 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
     GST_DEBUG_OBJECT (sink, "refine eos from %llu to %llu",
         priv->eos_time, priv->segment.stop);
     priv->eos_time = priv->segment.stop;
+  }
+
+  if (!avsync_get_time(sink, &pcr) && pcr == -1) {
+    GST_DEBUG_OBJECT (sink, "playback not started return");
+    return ret;
   }
 
   if (priv->eos_time != -1 && !priv->group_done) {
