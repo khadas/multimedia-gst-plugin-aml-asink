@@ -732,34 +732,47 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
       GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
     }
   } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
+                (int)(priv->first_pts - pcr) < 90000 &&
                 priv->sync_mode == AV_SYNC_MODE_AMASTER) {
     pcr = priv->first_pts;
     GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
   }
 
   if (priv->sync_mode != AV_SYNC_MODE_PCR_MASTER) {
+    gint64 timepassed2, diff;
+
     /* for live streaming need to consider PTS wrapping */
-    if (priv->last_pcr > 0xF0000000 && pcr < 10*PTS_90K) {
+    if (priv->last_pcr > 0xFFFF0000 && pcr < 10*PTS_90K) {
       priv->wrapping_time++;
       GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
     }
     priv->last_pcr = pcr;
 
-    if (priv->wrapping_time <= 1)
-      timepassed_90k = (int)(pcr - priv->first_pts);
+    if (!priv->wrapping_time)
+      timepassed_90k = pcr - priv->first_pts;
     else
-      timepassed_90k = (int)(pcr - priv->first_pts) +
-              (priv->wrapping_time - 1) * 0xFFFFFFFFLL;
+      timepassed_90k = (int)(pcr - priv->first_pts) + priv->wrapping_time * 0xFFFFFFFFLL;
 
     timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
     *cur = priv->first_pts_64 + timepassed;
+
+    if (priv->eos_time != -1) {
+        timepassed2 = priv->eos_time - priv->first_pts_64;
+        diff = (timepassed2 > timepassed)?
+            (timepassed2 - timepassed):(timepassed - timepassed2);
+        if (diff  > GST_SECOND * 10) {
+          GST_INFO_OBJECT (sink, "pts jump detected: %lld --> %lld",
+              timepassed, timepassed2);
+          *cur = timepassed2;
+        }
+    }
   } else {
     timepassed = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
     *cur = timepassed;
   }
 
-  GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT " pcr: %u",
-                  GST_TIME_ARGS (*cur), pcr);
+  GST_LOG_OBJECT (sink, "POSITION: %lld pcr: %u wrapping: %d",
+                  *cur, pcr, priv->wrapping_time);
   if (GST_FORMAT_TIME != format) {
     gboolean ret;
 
@@ -1533,7 +1546,7 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink,
         break;
       }
       usleep (30000);
-      GST_TRACE_OBJECT (sink, "now: %lld", now);
+      GST_LOG_OBJECT (sink, "now: %lld", now);
       continue;
     } else {
       ret = GST_CLOCK_OK;
@@ -1668,18 +1681,19 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       GstFlowReturn ret;
       GST_DEBUG_OBJECT (sink, "receive eos");
       priv->received_eos = TRUE;
-      ret = sink_drain (sink);
-      if (G_UNLIKELY (ret != GST_FLOW_OK)) {
-        result = FALSE;
-        goto done;
-      }
       GST_OBJECT_LOCK (sink);
-      priv->eos = TRUE;
       if (priv->xrun_timer) {
         g_timer_stop (priv->xrun_timer);
         priv->xrun_paused = false;
       }
       GST_OBJECT_UNLOCK (sink);
+
+      ret = sink_drain (sink);
+      if (G_UNLIKELY (ret != GST_FLOW_OK)) {
+        result = FALSE;
+        goto done;
+      }
+      priv->eos = TRUE;
 
       /* ok, now we can post the message */
       GST_WARNING_OBJECT (sink, "Now posting EOS");
