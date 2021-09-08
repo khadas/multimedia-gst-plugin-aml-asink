@@ -1395,18 +1395,6 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
     priv->stream_->common.set_parameters (&priv->stream_->common, setting);
   }
 
-  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
-    char setting[20];
-    priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
-    if (!priv->avsync) {
-      GST_ERROR_OBJECT (sink, "create av sync fail");
-      return FALSE;
-    }
-    /* set session into hwsync id */
-    snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
-    priv->stream_->common.set_parameters (&priv->stream_->common, setting);
-  }
-
   if (priv->stream_volume_pending) {
     priv->stream_volume_pending = FALSE;
     gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume, true);
