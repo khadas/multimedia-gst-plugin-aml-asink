@@ -113,6 +113,15 @@ AC_ARG_ENABLE([essos-rm],
 esac],[essos=false])
 AM_CONDITIONAL([ESSOS], [test x${essos} = xtrue])
 
+AC_ARG_ENABLE([ad],
+[  --enable-ad support audio description],
+[case "${enableval}" in
+  yes) ad=true ;;
+  no)  ad=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-ad]) ;;
+esac],[ad=false])
+AM_CONDITIONAL([AD], [test x${ad} = xtrue])
+
 dnl set proper LDFLAGS for plugins
 GST_PLUGIN_LDFLAGS='-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\).*'
 AC_SUBST(GST_PLUGIN_LDFLAGS)

@@ -28,6 +28,12 @@ libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
 
+if AD
+libgstamlhalasink_la_SOURCES += pes_private_data.c
+libgstamlhalasink_la_LDFLAGS += -lgstpesmeta
+libgstamlhalasink_la_CFLAGS += -DSUPPORT_AD
+endif
+
 if XRUN
 libgstamlhalasink_la_CFLAGS += -DENABLE_XRUN_DETECTION
 endif
@@ -46,5 +52,5 @@ libgstamlhalasink_la_LIBADD += -lessosrmgr
 endif
 
 # headers we need but don't want installed
-#noinst_HEADERS = 
+#noinst_HEADERS =
 include_HEADERS = gstamlclock.h gstamlhalasink_new.h

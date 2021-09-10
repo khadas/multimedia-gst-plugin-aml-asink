@@ -45,6 +45,10 @@
 #ifdef ESSOS_RM
 #include "essos-resmgr.h"
 #endif
+#ifdef SUPPORT_AD
+#include "gstmetapesheader.h"
+#include "pes_private_data.h"
+#endif
 
 GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_CAT_DEFAULT gst_aml_hal_asink_debug_category
@@ -190,6 +194,11 @@ struct _GstAmlHalAsinkPrivate
   gchar *ac4_lang;
   gchar *ac4_lang2;
 #endif
+#ifdef SUPPORT_AD
+  gboolean is_dual_audio;
+  gboolean is_ad_audio;
+  struct ad_des des_ad;
+#endif
 };
 
 enum
@@ -229,6 +238,10 @@ enum
   PROP_AC4_LANG_1,
   PROP_AC4_LANG_2,
   PROP_AC4_AUTO_S_PRI,
+#endif
+#ifdef SUPPORT_AD
+  PROP_DUAL_AUDIO,
+  PROP_AD_AUDIO,
 #endif
   PROP_A_WAIT_TIMEOUT,
   PROP_LAST
@@ -492,6 +505,16 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
         "2nd Preferred Language code (3 Letter ISO 639)",
         "null", G_PARAM_WRITABLE));
 #endif
+#ifdef SUPPORT_AD
+  g_object_class_install_property (gobject_class, PROP_DUAL_AUDIO,
+      g_param_spec_boolean ("enable-dual-audio", "enable dual audio",
+          "Enable dual audio decode, apply on to main instance",
+          FALSE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_AD_AUDIO,
+      g_param_spec_boolean ("supplementary-audio", "audio description",
+          "Description audio associated with main audio",
+          FALSE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+#endif
 
   g_object_class_install_property (gobject_class,
       PROP_A_WAIT_TIMEOUT,
@@ -594,6 +617,10 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->ac4_pat = -1;
   priv->ac4_pres_group_idx = -2;
   priv->ac4_lang = priv->ac4_lang2 = NULL;
+#endif
+#ifdef SUPPORT_AD
+  priv->des_ad.fade = priv->des_ad.pan = -1;
+  priv->des_ad.g_c = priv->des_ad.g_f = priv->des_ad.g_s = -1;
 #endif
   priv->aligned_timeout = -1;
   g_mutex_init (&priv->feed_lock);
@@ -704,7 +731,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     return TRUE;
   }
 
-  if (!priv->direct_mode_) {
+  if (!priv->avsync) {
     //TODO(song): get HAL position
     *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
     GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
@@ -996,6 +1023,24 @@ gst_aml_hal_sink_get_mute (GstAmlHalAsink * sink)
   return mute;
 }
 
+static void remove_clock (GObject * object)
+{
+  GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
+  GstElementClass *eclass = (GstElementClass *)class;
+  GstAmlHalAsink *sink = GST_AML_HAL_ASINK (object);
+  GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  /* will not provide GstAmlClock, application should take care of the
+   * session */
+  eclass->provide_clock = NULL;
+
+  if (priv->provided_clock) {
+    gst_object_unref (priv->provided_clock);
+    priv->provided_clock = NULL;
+  }
+  GST_OBJECT_FLAG_UNSET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
+}
 
 static void
 gst_aml_hal_asink_set_property (GObject * object, guint property_id,
@@ -1090,19 +1135,9 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     {
       int id = g_value_get_int (value);
       if (id >= 0) {
-        GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
-        GstElementClass *eclass = (GstElementClass *)class;
-        GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
-
-        /* will not provide GstAmlClock, application should take care of the
-         * session */
+        remove_clock (object);
         priv->session_id = id;
-        eclass->provide_clock = NULL;
-
-        gst_object_unref (priv->provided_clock);
-        priv->provided_clock = NULL;
-        GST_OBJECT_FLAG_UNSET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
-        GST_WARNING_OBJECT (sink, "avsync session %u", priv->session_id);
+        GST_WARNING_OBJECT (sink, "avsync session %u", id);
       }
       break;
     }
@@ -1179,6 +1214,29 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         break;
       }
       GST_WARNING_OBJECT (sink, "ac4_lang2:%s", priv->ac4_lang2);
+      break;
+#endif
+#ifdef SUPPORT_AD
+    case PROP_DUAL_AUDIO:
+    {
+      gboolean is_dual_audio = g_value_get_boolean(value);
+
+      GST_WARNING_OBJECT (sink, "dual audio: %d", is_dual_audio);
+      if (priv->is_ad_audio && is_dual_audio) {
+        GST_WARNING_OBJECT (sink, "ad ignore dual audio");
+        break;
+      }
+      priv->is_dual_audio = is_dual_audio;
+      break;
+    }
+    case PROP_AD_AUDIO:
+      priv->is_ad_audio = g_value_get_boolean(value);
+      GST_WARNING_OBJECT (sink, "ad audio: %d", priv->is_ad_audio);
+      if (priv->is_ad_audio && priv->is_dual_audio) {
+        GST_WARNING_OBJECT (sink, "ad disable dual audio");
+        priv->is_dual_audio = false;
+        remove_clock (object);
+      }
       break;
 #endif
     case PROP_A_WAIT_TIMEOUT:
@@ -1348,8 +1406,9 @@ static gboolean caps_not_changed(GstAmlHalAsink *sink, GstCaps * cur, GstCaps * 
 
   /* audio hal can handle the change for eac3 */
   if (cur_spec->type == new_spec.type &&
-          cur_spec->type == GST_AUDIO_RING_BUFFER_FORMAT_TYPE_EAC3) {
-    GST_DEBUG_OBJECT (sink, "ignore eac3 format change");
+          (cur_spec->type == GST_AUDIO_RING_BUFFER_FORMAT_TYPE_EAC3 ||
+           cur_spec->type == GST_AUDIO_RING_BUFFER_FORMAT_TYPE_AC3)) {
+    GST_DEBUG_OBJECT (sink, "ignore eac3/ac3 format change");
     ret = TRUE;
   }
 
@@ -1361,6 +1420,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GstAudioRingBufferSpec *spec;
+  gboolean bypass_avs = FALSE;
 
   spec = &priv->spec;
 
@@ -1396,7 +1456,12 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
   }
   GST_OBJECT_UNLOCK (sink);
 
-  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+#ifdef SUPPORT_AD
+  if (priv->is_ad_audio)
+    bypass_avs = TRUE;
+#endif
+
+  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER && !bypass_avs) {
     char setting[20];
     priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
     if (!priv->avsync) {
@@ -1736,6 +1801,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     case GST_EVENT_SEGMENT:
     {
       GstSegment segment;
+      gboolean bypass_avs = FALSE;
       gst_event_copy_segment (event, &segment);
       GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
               &segment);
@@ -1762,8 +1828,13 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         priv->segment.rate = segment.rate;
       }
 
+#ifdef SUPPORT_AD
+      if (priv->is_ad_audio)
+        bypass_avs = TRUE;
+#endif
+
       /* create avsync before rate change */
-      if (!priv->avsync && priv->direct_mode_) {
+      if (!priv->avsync && priv->direct_mode_ && !bypass_avs) {
         char setting[20];
         struct start_policy policy;
 
@@ -2080,6 +2151,43 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   if (G_UNLIKELY (priv->received_eos))
     goto was_eos;
+
+#ifdef SUPPORT_AD
+  if (priv->is_dual_audio || priv->is_ad_audio) {
+    GstMetaPesHeader* h = GST_META_PES_HEADER_GET (buf);
+
+    GST_LOG("get meta %p", h);
+#ifdef DUMP_TO_FILE
+    if (h) {
+      char *name;
+
+      if (priv->is_dual_audio)
+        name = "/data/apes_m_";
+      else
+        name = "/data/apes_ad_";
+      dump (name, h->header, h->length);
+    }
+#endif
+    if (h) {
+      struct ad_des des;
+      int lret = pes_get_ad_des (h->header, h->length, &des);
+      char setting[50];
+
+      if (!lret && memcmp(&priv->des_ad, &des, sizeof(des))) {
+        snprintf (setting, sizeof(setting),
+            "AD_descriptor=%02x %02x %02x %02x %02x",
+            des.fade, des.g_c, des.g_f, des.g_s, des.pan);
+        priv->hw_dev_->set_parameters (priv->hw_dev_, setting);
+        memcpy(&priv->des_ad, &des, sizeof(des));
+        GST_DEBUG_OBJECT (sink, "m(%d)/ad(%d) gain %d %d %d %d %d",
+            priv->is_dual_audio, priv->is_ad_audio,
+            des.fade, des.pan, des.g_c, des.g_f, des.g_s);
+      } else if (lret) {
+        GST_LOG("can not get ad ret %d", lret);
+      }
+    }
+  }
+#endif
 
   bpf = GST_AUDIO_INFO_BPF (&priv->spec.info);
   rate = GST_AUDIO_INFO_RATE (&priv->spec.info);
@@ -2421,6 +2529,11 @@ static void essos_rm_init(GstAmlHalAsink *sink)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   const char *env = getenv("AMLASINK_USE_ESSRMGR");
 
+#ifdef SUPPORT_AD
+  if (priv->is_ad_audio)
+    return;
+#endif
+
   if (env && !atoi(env))
     return;
 
@@ -2531,7 +2644,7 @@ gst_aml_hal_asink_change_state (GstElement * element,
     {
       GstBaseSink* bsink = GST_BASE_SINK_CAST (sink);
       GST_INFO_OBJECT(sink, "playing to paused");
-      if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+      if (priv->avsync && priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
         GST_INFO_OBJECT(sink, "avsync to free run");
         av_sync_change_mode (priv->avsync, AV_SYNC_MODE_FREE_RUN);
       }
@@ -2808,6 +2921,22 @@ aml_open_output_stream (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
   else
     flag = AUDIO_OUTPUT_FLAG_PRIMARY;
 
+#if SUPPORT_AD
+  if (priv->is_dual_audio) {
+    char setting[50];
+
+    snprintf(setting, sizeof(setting), "dual_decoder_support=1");
+    priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  }
+  if (priv->is_ad_audio) {
+    char setting[50];
+
+    flag |= AUDIO_OUTPUT_FLAG_AD_STREAM;
+    snprintf(setting, sizeof(setting), "associate_audio_mixing_enable=1");
+    priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  }
+#endif
+
   if (priv->output_port_ == 0)
     device = AUDIO_DEVICE_OUT_SPEAKER;
   else if (priv->output_port_ == 1)
@@ -2887,6 +3016,22 @@ static gboolean hal_release (GstAmlHalAsink * sink)
     priv->render_samples = 0;
   }
   g_mutex_unlock(&priv->feed_lock);
+
+#if SUPPORT_AD
+  if (priv->is_dual_audio) {
+    char setting[50];
+
+    snprintf(setting, sizeof(setting), "dual_decoder_support=0");
+    priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  }
+
+  if (priv->is_ad_audio) {
+    char setting[50];
+
+    snprintf(setting, sizeof(setting), "associate_audio_mixing_enable=0");
+    priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  }
+#endif
 
   GST_INFO_OBJECT(sink, "done");
   return TRUE;
