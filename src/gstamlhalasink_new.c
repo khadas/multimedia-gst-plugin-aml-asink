@@ -1497,7 +1497,7 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink,
     goto exit;
   }
 
-  if (now > time) {
+  if (now >= time) {
     GST_DEBUG_OBJECT (sink, "now: %lld", now);
     ret = GST_CLOCK_EARLY;
     goto exit;
