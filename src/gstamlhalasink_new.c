@@ -287,6 +287,16 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       )
     );
 
+static GstStaticPadTemplate template_system_sound =
+GST_STATIC_PAD_TEMPLATE ("sink",
+  GST_PAD_SINK,
+  GST_PAD_ALWAYS,
+  GST_STATIC_CAPS (
+    "audio/x-raw,format=S16LE,rate=48000,"
+    "channels=2,layout=interleaved; "
+  )
+);
+
 #define GST_TYPE_AHAL_OUTPUT_PORT \
   (gst_ahal_output_port_get_type ())
 
@@ -1071,6 +1081,14 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         GST_OBJECT_FLAG_UNSET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
       }
       GST_OBJECT_UNLOCK (sink);
+      if (!priv->direct_mode_) {
+        GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
+        gst_element_remove_pad (GST_ELEMENT_CAST (basesink), basesink->sinkpad);
+        basesink->sinkpad = gst_pad_new_from_static_template (&template_system_sound, "sink");
+        gst_element_add_pad (GST_ELEMENT_CAST (basesink), basesink->sinkpad);
+        gst_pad_set_event_function (basesink->sinkpad, gst_aml_hal_asink_pad_event);
+        gst_pad_set_chain_function (basesink->sinkpad, gst_aml_hal_asink_chain);
+      }
       break;
     }
     case PROP_TTS_MODE:
