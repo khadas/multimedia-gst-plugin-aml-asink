@@ -1851,6 +1851,9 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         bypass_avs = TRUE;
 #endif
 
+      if (priv->tempo_used)
+        scaletempo_update_segment (&priv->st, &priv->segment);
+
       /* create avsync before rate change */
       if (!priv->avsync && priv->direct_mode_ && !bypass_avs) {
         char setting[20];
@@ -1883,9 +1886,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
         priv->stream_->common.set_parameters (&priv->stream_->common, setting);
       }
-
-      if (priv->tempo_used)
-        scaletempo_update_segment (&priv->st, &priv->segment);
 
       if (priv->direct_mode_) {
         update_avsync_speed(sink, segment.rate);
@@ -3663,7 +3663,7 @@ GstClock *gst_aml_hal_asink_get_clock (GstElement *element)
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  return gst_element_register (plugin, "amlhalasink", GST_RANK_PRIMARY,
+  return gst_element_register (plugin, "amlhalasink", GST_RANK_PRIMARY + 1,
       GST_TYPE_AML_HAL_ASINK);
 }
 
