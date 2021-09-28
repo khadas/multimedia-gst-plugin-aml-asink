@@ -1636,10 +1636,9 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
   GstFlowReturn ret = GST_FLOW_OK;
   pts90K pcr;
 
-  if (!priv->stream_)
+  if ((!priv->stream_) || (!priv->spec.info.rate) || (!priv->direct_mode_)) {
     return ret;
-  if (!priv->spec.info.rate)
-    return ret;
+  }
 
   GST_DEBUG_OBJECT (sink, "draining");
 
