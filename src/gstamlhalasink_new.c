@@ -71,6 +71,10 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define DEFAULT_LATENCY_TIME    ((10 * GST_MSECOND) / GST_USECOND)
 
 #define GST_AUDIO_FORMAT_TYPE_AC4 100
+#define GST_AUDIO_FORMAT_TYPE_VORBIS 101
+#define GST_AUDIO_FORMAT_TYPE_LPCM_PRIV1 102
+#define GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2 103
+#define GST_AUDIO_FORMAT_TYPE_LPCM_TS 104
 #define PTS_90K 90000
 
 #ifdef DUMP_TO_FILE
@@ -284,6 +288,9 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       "audio/x-gst-fourcc-dtse;"
       "audio/x-dtsl;"
 #endif
+      "audio/x-private1-lpcm; "
+      "audio/x-private2-lpcm; "
+      "audio/x-private-ts-lpcm; "
       )
     );
 
@@ -1382,6 +1389,27 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     if (!gst_structure_get_int (structure, "channels", &info.channels))
         info.channels = 2;
     spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_DTS;
+    info.bpf = 1;
+  }  else if (g_str_equal (mimetype, "audio/x-private1-lpcm")) {
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+        info.rate = 48000;
+    if (!gst_structure_get_int (structure, "channels", &info.channels))
+        info.channels = 2;
+    spec->type = GST_AUDIO_FORMAT_TYPE_LPCM_PRIV1;
+    info.bpf = 1;
+  }   else if (g_str_equal (mimetype, "audio/x-private2-lpcm")) {
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+        info.rate = 48000;
+    if (!gst_structure_get_int (structure, "channels", &info.channels))
+        info.channels = 2;
+    spec->type = GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2;
+    info.bpf = 1;
+  }   else if (g_str_equal (mimetype, "audio/x-private-ts-lpcm")) {
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+        info.rate = 48000;
+    if (!gst_structure_get_int (structure, "channels", &info.channels))
+        info.channels = 2;
+    spec->type = GST_AUDIO_FORMAT_TYPE_LPCM_TS;
     info.bpf = 1;
   } else {
     goto parse_error;
@@ -2861,6 +2889,15 @@ hal_parse_spec (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
       break;
     case GST_AUDIO_RING_BUFFER_FORMAT_TYPE_DTS:
       priv->format_ = AUDIO_FORMAT_DTS;
+      break;
+    case GST_AUDIO_FORMAT_TYPE_LPCM_PRIV1:
+      priv->format_ = AUDIO_FORMAT_PCM_LPCM_DVD;
+      break;
+    case GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2:
+      priv->format_ = AUDIO_FORMAT_PCM_LPCM_1394;
+      break;
+    case GST_AUDIO_FORMAT_TYPE_LPCM_TS:
+      priv->format_ = AUDIO_FORMAT_PCM_LPCM_BLURAY;
       break;
     default:
       goto error;
