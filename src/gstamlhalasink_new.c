@@ -76,6 +76,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2 103
 #define GST_AUDIO_FORMAT_TYPE_LPCM_TS 104
 #define PTS_90K 90000
+#define HAL_INVALID_PTS (GST_CLOCK_TIME_NONE - 1)
 
 #ifdef DUMP_TO_FILE
 static guint file_index;
@@ -2249,8 +2250,9 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   GST_LOG_OBJECT (sink,
       "time %" GST_TIME_FORMAT ", start %"
-      GST_TIME_FORMAT ", samples %u", GST_TIME_ARGS (time),
-      GST_TIME_ARGS (priv->segment.start), samples);
+      GST_TIME_FORMAT ", samples %u size %u", GST_TIME_ARGS (time),
+      GST_TIME_ARGS (priv->segment.start), samples, size);
+
   priv->last_ts = GST_BUFFER_TIMESTAMP (buf);
 
   /* let's calc stop based on the number of samples in the buffer instead
@@ -3575,10 +3577,15 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     }
     if (priv->direct_mode_) {
       struct hw_sync_header_v2 *hw_sync;
-      uint32_t pts_32 = gst_util_uint64_scale_int (pts_64, PTS_90K, GST_SECOND);
+      uint32_t pts_32 = -1;
 
       //truncate to 32bit PTS
-      pts_64 = gst_util_uint64_scale_int(pts_32, GST_SECOND, PTS_90K);
+      if (pts_64 != GST_CLOCK_TIME_NONE && pts_64 != HAL_INVALID_PTS) {
+        pts_32 = gst_util_uint64_scale_int (pts_64, PTS_90K, GST_SECOND);
+        pts_64 = gst_util_uint64_scale_int(pts_32, GST_SECOND, PTS_90K);
+      } else {
+        pts_64 = HAL_INVALID_PTS;
+      }
 
       if (!trans) {
         hw_sync = (struct hw_sync_header_v2 *)priv->trans_buf;
@@ -3614,7 +3621,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
       hw_sync_set_offset(hw_sync, 0);
       cur_size += hw_header_s;
 
-      if (priv->diag_log_enable)
+      if (priv->diag_log_enable && pts_32 != -1)
         diag_print (sink, pts_32);
     } else if (raw_data) {
       /* audio hal can not handle too big frame, limit to 4K*/
@@ -3643,7 +3650,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
         "write %d/%d left %d ts: %llu", written, cur_size, towrite, pts_64);
 
     /* update PTS for next sample */
-    if (priv->direct_mode_) {
+    if (priv->direct_mode_ && pts_64 != HAL_INVALID_PTS) {
       if (priv->sr_) {
         if (raw_data) {
           gint bpf = GST_AUDIO_INFO_BPF (&priv->spec.info);
