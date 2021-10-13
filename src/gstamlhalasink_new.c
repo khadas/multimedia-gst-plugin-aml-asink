@@ -60,7 +60,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define DEFAULT_VOLUME          1.0
 #define MAX_VOLUME              1.0
 
-#define MAX_TRANS_BUF_SIZE     0x8000
+#define MAX_TRANS_BUF_SIZE     0x10000
 #define TRANS_DATA_OFFSET      0x40
 //32KB
 #define TRANS_DATA_SIZE        (MAX_TRANS_BUF_SIZE - TRANS_DATA_OFFSET)
