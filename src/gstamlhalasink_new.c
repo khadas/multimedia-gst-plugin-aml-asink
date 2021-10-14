@@ -1320,6 +1320,9 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
     case PROP_A_WAIT_TIMEOUT:
       g_value_set_int (value, priv->aligned_timeout);
       break;
+    case PROP_DISABLE_TEMPO_STRETCH:
+      g_value_set_boolean (value, priv->tempo_disable);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
