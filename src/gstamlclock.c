@@ -23,6 +23,11 @@
 #include "gstamlclock.h"
 #include "aml_avsync.h"
 
+#ifdef MEDIA_SYNC
+#include <stdio.h>
+#include "MediaSyncInterface.h"
+#endif
+
 GST_DEBUG_CATEGORY_STATIC (gst_aml_clock_debug);
 #define GST_CAT_DEFAULT gst_aml_clock_debug
 #define GST_AML_CLOCK_GET_PRIVATE(obj)  \
@@ -36,6 +41,10 @@ struct _GstAmlClockPrivate
 
   int session;
   int session_id;
+
+#ifdef MEDIA_SYNC
+  void *media_sync_handle;
+#endif
 };
 
 #define parent_class gst_aml_clock_parent_class
@@ -82,7 +91,21 @@ gst_aml_clock_init (GstAmlClock * clock)
   clock->priv = priv;
   priv->session_id = -1;
 
+#ifdef MEDIA_SYNC
+  priv->media_sync_handle = MediaSync_create();
+  priv->session = MediaSync_allocInstance(priv->media_sync_handle, 0, 0, &priv->session_id);
+  FILE * fp;
+  fp = fopen("/data/MediaSyncId", "w");
+  if (fp == NULL) {
+    GST_ERROR("could not open file:/data/MediaSyncId failed");
+  } else {
+    fwrite(&priv->session_id, sizeof(int), 1, fp);
+    fclose(fp);
+  }
+#else
   priv->session = av_sync_open_session(&priv->session_id);
+#endif
+
   if (priv->session < 0) {
     GST_ERROR("can not create session");
   }
@@ -101,6 +124,12 @@ gst_aml_clock_dispose (GObject * object)
   priv->user_data = NULL;
   if (priv->session >= 0)
     av_sync_close_session(priv->session);
+
+#ifdef MEDIA_SYNC
+  if (priv->media_sync_handle) {
+    MediaSync_destroy(priv->media_sync_handle);
+  }
+#endif
 
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }

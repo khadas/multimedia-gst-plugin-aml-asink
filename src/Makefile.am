@@ -46,6 +46,11 @@ if DTS
 libgstamlhalasink_la_CFLAGS += -DENABLE_DTS
 endif
 
+if MEDIA_SYNC
+libgstamlhalasink_la_CFLAGS += -DMEDIA_SYNC
+libgstamlhalasink_la_LIBADD += -lmediahal_mediasync
+endif
+
 if ESSOS
 libgstamlhalasink_la_CFLAGS += -DESSOS_RM
 libgstamlhalasink_la_LIBADD += -lessosrmgr
