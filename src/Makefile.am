@@ -54,3 +54,6 @@ endif
 # headers we need but don't want installed
 #noinst_HEADERS =
 include_HEADERS = gstamlclock.h gstamlhalasink_new.h
+
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = amlhalasink.pc

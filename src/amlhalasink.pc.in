@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: amlhalasink
+Description: Amlogic gstreamer audio plugin
+Version: @VERSION@
+Libs: -L${libdir}/gstreamer-1.0 -lgstamlhalasink
+Cflags: -I${includedir}

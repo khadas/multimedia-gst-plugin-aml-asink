@@ -2,7 +2,7 @@ dnl required version of autoconf
 AC_PREREQ([2.69])
 
 dnl TODO: fill in your package name and package version here
-AC_INIT([aml-asink-plugin-package],[1.0.0])
+AC_INIT([amlhalasink],[1.0.0])
 
 dnl required versions of gstreamer and plugins-base
 GST_REQUIRED=1.0.0
@@ -128,6 +128,7 @@ AC_SUBST(GST_PLUGIN_LDFLAGS)
 
 AC_CONFIG_FILES([Makefile
   src/Makefile
+  src/amlhalasink.pc
 ])
 AC_OUTPUT
 
