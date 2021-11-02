@@ -147,6 +147,7 @@ struct _GstAmlHalAsinkPrivate
   struct scale_tempo st;
   gboolean tempo_used;
   float rate;
+  gboolean need_update_rate;
 
   /* pause pts */
   uint32_t pause_pts;
@@ -1911,7 +1912,10 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       }
 
       if (priv->direct_mode_) {
-        update_avsync_speed(sink, segment.rate);
+        if (!priv->tempo_used && segment.rate != 1.0)
+          update_avsync_speed(sink, segment.rate);
+        else
+          priv->need_update_rate = TRUE;
         GST_INFO_OBJECT (sink, "rate to %f", segment.rate);
       }
       break;
@@ -2349,6 +2353,11 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     gst_buffer_unmap (buf, &info);
     g_mutex_unlock(&priv->feed_lock);
     goto done;
+  }
+
+  if (priv->need_update_rate) {
+    update_avsync_speed(sink, priv->segment.rate);
+    priv->need_update_rate = FALSE;
   }
 
   if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
@@ -3660,7 +3669,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
 
           if (bpf)
             pts_inc = gst_util_uint64_scale_int (written/bpf,
-                GST_SECOND, priv->sr_);
+                GST_SECOND, priv->sr_) * priv->rate;
         } else
           pts_inc = gst_util_uint64_scale_int (priv->sample_per_frame,
               GST_SECOND, priv->sr_);
