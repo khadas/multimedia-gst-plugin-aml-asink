@@ -458,8 +458,8 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   g_object_class_install_property (gobject_class,
       PROP_AVSYNC_MODE,
       g_param_spec_uint ("avsync-mode", "Avsync mode",
-          "Set avsync mode 0 (amaster) 1 (pcr master) 2 (iptv)",
-          0, 2, 0, G_PARAM_READWRITE));
+          "Set avsync mode 0 (amaster) 1 (pcr master) 2 (iptv) 4 (freerun)",
+          0, 4, 0, G_PARAM_READWRITE));
 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_PAUSE_PTS,
       g_param_spec_uint ("pause-pts", "pause pts",
@@ -1135,6 +1135,8 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         priv->sync_mode = AV_SYNC_MODE_IPTV;
         priv->tempo_used = FALSE;
         priv->tempo_disable = TRUE;
+      } else if (mode == 4) {
+        priv->sync_mode = AV_SYNC_MODE_FREE_RUN;
       } else {
         GST_ERROR_OBJECT (sink, "invalid sync mode %d", mode);
       }
@@ -1883,11 +1885,11 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         char setting[20];
         struct start_policy policy;
 
-         if (priv->seamless_switch) {
-           priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
-         } else {
-           priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
-         }
+        if (priv->seamless_switch) {
+          priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
+        } else {
+          priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+        }
         if (!priv->avsync) {
           GST_ERROR_OBJECT (sink, "create av sync fail");
           break;
