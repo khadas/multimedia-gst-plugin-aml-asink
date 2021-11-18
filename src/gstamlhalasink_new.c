@@ -1513,9 +1513,12 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
       GST_ERROR_OBJECT (sink, "create av sync fail");
       return FALSE;
     }
+    g_mutex_lock(&priv->feed_lock);
     /* set session into hwsync id */
     snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
-    priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+    if (priv->stream_)
+      priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+    g_mutex_unlock(&priv->feed_lock);
   }
 
   if (priv->stream_volume_pending) {
@@ -1909,8 +1912,11 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           avs_sync_set_start_policy (priv->avsync, &policy);
         }
         /* set session into hwsync id */
+        g_mutex_lock(&priv->feed_lock);
         snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
-        priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+        if (priv->stream_)
+          priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+        g_mutex_unlock(&priv->feed_lock);
       }
 
       if (priv->direct_mode_) {
