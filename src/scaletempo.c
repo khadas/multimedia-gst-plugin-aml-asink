@@ -261,6 +261,7 @@ reinit_buffers (struct scale_tempo * st)
       (gint) (st->bytes_queue_max / st->bytes_per_frame),
       gst_audio_format_to_string (st->format));
 
+  st->first_frame_flag = TRUE;
   st->reinit_buffers = FALSE;
 }
 
@@ -274,6 +275,13 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
   guint64 timestamp;
   guint offset_out = 0;
   guint64 offset_out_pts = 0;
+
+  if (st->first_frame_flag) {
+    gst_buffer_copy_into (outbuf, inbuf, GST_BUFFER_COPY_MEMORY, 0, -1);
+    gst_buffer_set_size (outbuf, gst_buffer_get_size (inbuf));
+    st->first_frame_flag = FALSE;
+    return GST_FLOW_OK;
+  }
 
   if (!gst_buffer_map (outbuf, &omap, GST_MAP_WRITE)) {
     GST_ERROR ("map buffer fail");
@@ -342,6 +350,12 @@ gboolean scaletempo_transform_size (struct scale_tempo * scaletempo,
 
   if (scaletempo->reinit_buffers)
     reinit_buffers (scaletempo);
+
+  if (scaletempo->first_frame_flag) {
+    *othersize = size;
+    GST_TRACE ("The first frame of data is output directly, used to start avsync");
+    return TRUE;
+  }
 
   bytes_to_out = size + scaletempo->bytes_queued - scaletempo->bytes_to_slide;
   if (bytes_to_out < (gint) scaletempo->bytes_queue_max) {

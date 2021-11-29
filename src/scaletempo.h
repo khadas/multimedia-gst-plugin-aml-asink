@@ -72,6 +72,7 @@ struct scale_tempo
   gint64      segment_start;
   /* threads */
   gboolean reinit_buffers;
+  gboolean first_frame_flag;
 };
 
 
