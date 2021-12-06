@@ -1688,7 +1688,7 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
     priv->eos_time = priv->segment.stop;
   }
 
-  if (!avsync_get_time(sink, &pcr) && pcr == -1) {
+  if (!avsync_get_time(sink, &pcr) && pcr == -1 && !priv->paused_) {
     GST_DEBUG_OBJECT (sink, "playback not started return");
     return ret;
   }
