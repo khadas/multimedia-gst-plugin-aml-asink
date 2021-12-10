@@ -272,13 +272,27 @@ GstFlowReturn scaletempo_transform (struct scale_tempo * st,
   gint8 *pout;
   guint offset_in, bytes_out;
   GstMapInfo omap;
+  GstMapInfo imap;
   guint64 timestamp;
   guint offset_out = 0;
   guint64 offset_out_pts = 0;
 
   if (st->first_frame_flag) {
-    gst_buffer_copy_into (outbuf, inbuf, GST_BUFFER_COPY_MEMORY, 0, -1);
-    gst_buffer_set_size (outbuf, gst_buffer_get_size (inbuf));
+    if (!gst_buffer_map (outbuf, &omap, GST_MAP_WRITE)) {
+      GST_ERROR ("map buffer fail");
+      return GST_FLOW_ERROR;
+    }
+
+    if (!gst_buffer_map (inbuf, &imap, GST_MAP_READ)) {
+      GST_ERROR ("map buffer fail");
+      gst_buffer_unmap (outbuf, &omap);
+      return GST_FLOW_ERROR;
+    }
+
+    memcpy (omap.data, imap.data, imap.size);
+    gst_buffer_set_size (outbuf, imap.size);
+    gst_buffer_unmap (outbuf, &omap);
+    gst_buffer_unmap (inbuf, &imap);
     st->first_frame_flag = FALSE;
     return GST_FLOW_OK;
   }
