@@ -92,9 +92,6 @@ struct _GstAmlHalAsinkPrivate
   GstAudioRingBufferSpec spec;
 
   /* patch for vol control */
-  struct audio_port_config source_;
-  struct audio_port_config sink_;
-  audio_patch_handle_t patch_h_;
   gboolean mute_;
 
   /* condition lock for chain and other threads */
@@ -2794,50 +2791,14 @@ static gboolean gst_aml_hal_asink_open (GstAmlHalAsink* sink)
     return FALSE;
   }
   GST_DEBUG_OBJECT (sink, "load hw done");
-
-  priv->source_.id = 1;
-  priv->source_.role = AUDIO_PORT_ROLE_SOURCE;
-  priv->source_.type = AUDIO_PORT_TYPE_MIX;
-  priv->source_.config_mask = AUDIO_PORT_CONFIG_SAMPLE_RATE |
-    AUDIO_PORT_CONFIG_FORMAT;
-  priv->source_.sample_rate = 48000;
-  priv->source_.format = AUDIO_FORMAT_PCM_16_BIT;
-
-  priv->sink_.id = 2;
-  priv->sink_.role = AUDIO_PORT_ROLE_SINK;
-  priv->sink_.type = AUDIO_PORT_TYPE_DEVICE;
-  priv->sink_.config_mask = AUDIO_PORT_CONFIG_SAMPLE_RATE |
-    AUDIO_PORT_CONFIG_FORMAT;
-  priv->sink_.sample_rate = 48000;
-  priv->sink_.format = AUDIO_FORMAT_PCM_16_BIT;
-  priv->sink_.ext.device.type = AUDIO_DEVICE_OUT_SPEAKER;
-
-  GST_DEBUG_OBJECT(sink, "create mix --> speaker patch...");
-  ret = priv->hw_dev_->create_audio_patch(priv->hw_dev_,
-      1, &priv->source_,
-      1, &priv->sink_,
-      &priv->patch_h_);
-  if (ret)
-    GST_ERROR_OBJECT(sink, "patch fail ret:%d",ret);
-  else
-    GST_DEBUG_OBJECT(sink, "success");
-
   return TRUE;
 }
 
 static gboolean gst_aml_hal_asink_close (GstAmlHalAsink* sink)
 {
-  int ret;
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
   GST_DEBUG_OBJECT(sink, "close");
-  if (priv->patch_h_) {
-    ret = priv->hw_dev_->release_audio_patch(priv->hw_dev_, priv->patch_h_);
-    if (ret)
-      GST_ERROR_OBJECT(sink, "destroy patch fail ret:%d",ret);
-    priv->patch_h_ = 0;
-    GST_DEBUG_OBJECT(sink, "patch destroyed");
-  }
   audio_hw_unload_interface(priv->hw_dev_);
   priv->hw_dev_ = NULL;
   GST_DEBUG_OBJECT(sink, "unload hw");
