@@ -1505,7 +1505,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
 
   if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER && !bypass_avs) {
     char setting[20];
-    priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+    priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
     if (!priv->avsync) {
       GST_ERROR_OBJECT (sink, "create av sync fail");
       return FALSE;
@@ -1885,7 +1885,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         char setting[20];
         struct start_policy policy;
 
-        if (priv->seamless_switch) {
+        if (priv->seamless_switch || priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
           priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
         } else {
           priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
