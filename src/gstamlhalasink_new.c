@@ -91,9 +91,6 @@ struct _GstAmlHalAsinkPrivate
   /* current cap */
   GstAudioRingBufferSpec spec;
 
-  /* patch for vol control */
-  gboolean mute_;
-
   /* condition lock for chain and other threads */
   GCond   run_ready;
   GMutex  feed_lock;
@@ -149,9 +146,10 @@ struct _GstAmlHalAsinkPrivate
   /* pause pts */
   uint32_t pause_pts;
 
-  /* master volume */
-  gboolean master_volume_pending;
-  float master_volume;
+  /* mute */
+  gboolean mute;
+  gboolean mute_pending;
+  float stream_volume_bak;
 
   /* stream volume */
   gboolean stream_volume_pending;
@@ -1032,37 +1030,36 @@ gst_aml_hal_sink_set_stream_volume (GstAmlHalAsink * sink, float vol, gboolean f
 }
 
 static void
-gst_aml_hal_sink_set_mute (GstAmlHalAsink * sink, gboolean mute)
+gst_aml_hal_sink_set_stream_mute (GstAmlHalAsink * sink, gboolean mute)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
   int ret;
+  float target;
 
-  GST_WARNING_OBJECT (sink, "set mute:%d", mute);
-  ret = priv->hw_dev_->set_master_mute( priv->hw_dev_, mute);
-  if (ret)
-    GST_ERROR_OBJECT(sink, "mute fail:%d", ret);
-  else
-    priv->mute_ = mute;
-}
-
-static gboolean
-gst_aml_hal_sink_get_mute (GstAmlHalAsink * sink)
-{
-  GstAmlHalAsinkPrivate *priv = sink->priv;
-  bool mute = false;
-  int ret;
-
-  if (!priv->hw_dev_) {
-    GST_ERROR_OBJECT(sink, "audio HAL not open yet");
-    return mute;
+  if (!priv->mute_pending && mute == priv->mute) {
+    GST_WARNING_OBJECT(sink, "no need to mute %d", mute);
+    return;
   }
 
-  ret = priv->hw_dev_->get_master_mute(priv->hw_dev_, &mute);
-  if (ret)
-    GST_ERROR_OBJECT(sink, "get_master_mute fail: %d",ret);
+  if (!priv->stream_) {
+    GST_WARNING_OBJECT(sink, "audio stream not open yet, delayed");
+    priv->mute_pending = TRUE;
+    priv->mute = mute;
+    return;
+  }
 
-  GST_LOG_OBJECT (sink, "master mute:%d", mute);
-  return mute;
+  GST_WARNING_OBJECT (sink, "set stream mute:%d", mute);
+  if (mute) {
+    target = 0;
+    priv->stream_volume_bak = priv->stream_volume;
+  } else {
+    target = priv->stream_volume_bak;
+  }
+  ret = priv->stream_->set_volume (priv->stream_, target, target);
+  if (ret)
+    GST_ERROR_OBJECT(sink, "stream mute fail:%d", ret);
+  else
+    priv->mute = mute;
 }
 
 static void remove_clock (GObject * object)
@@ -1144,8 +1141,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       break;
     }
     case PROP_MUTE:
-      gst_aml_hal_sink_set_mute (sink, g_value_get_boolean (value));
+    {
+      gst_aml_hal_sink_set_stream_mute (sink, g_value_get_boolean (value));
       break;
+    }
     case PROP_AVSYNC_MODE:
     {
       guint mode = g_value_get_uint (value);
@@ -1402,11 +1401,13 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
       break;
     case PROP_MASTER_VOLUME:
     case PROP_STREAM_VOLUME:
-      g_value_set_double (value, priv->stream_volume); 
+      if (priv->mute)
+        g_value_set_double (value, priv->stream_volume_bak);
+      else
+        g_value_set_double (value, priv->stream_volume);
       break;
     case PROP_MUTE:
-      priv->mute_ = gst_aml_hal_sink_get_mute(sink);
-      g_value_set_boolean (value, priv->mute_);
+      g_value_set_boolean (value, priv->mute);
       break;
     case PROP_AVSYNC_MODE:
       g_value_set_uint (value, priv->sync_mode);
@@ -1627,6 +1628,10 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
   if (priv->stream_volume_pending) {
     priv->stream_volume_pending = FALSE;
     gst_aml_hal_sink_set_stream_volume (sink, priv->stream_volume, true);
+  }
+  if (priv->mute_pending) {
+    gst_aml_hal_sink_set_stream_mute (sink, priv->mute);
+    priv->mute_pending = FALSE;
   }
 
   if (is_raw_type(spec->type) && priv->direct_mode_ && !priv->tempo_disable) {
