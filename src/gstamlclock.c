@@ -39,7 +39,7 @@ struct _GstAmlClockPrivate
 };
 
 #define parent_class gst_aml_clock_parent_class
-#if GST_CHECK_VERSION(1,14,0)
+#if GLIB_CHECK_VERSION(2,58,0)
 G_DEFINE_TYPE_WITH_CODE (GstAmlClock, gst_aml_clock, GST_TYPE_SYSTEM_CLOCK,
 	GST_DEBUG_CATEGORY_INIT (gst_aml_clock_debug, "audioclock", 0,
 	"amlclock");G_ADD_PRIVATE(GstAmlClock));
@@ -63,7 +63,7 @@ gst_aml_clock_class_init (GstAmlClockClass * klass)
   gstclock_class->get_internal_time = gst_aml_clock_get_internal_time;
   gobject_class->dispose = gst_aml_clock_dispose;
 
-#if GST_CHECK_VERSION(1,14,0)
+#if GLIB_CHECK_VERSION(2,58,0)
 #else
   g_type_class_add_private (klass, sizeof (GstAmlClockPrivate));
 #endif
@@ -74,7 +74,7 @@ gst_aml_clock_init (GstAmlClock * clock)
 {
   GST_DEBUG_OBJECT (clock, "init");
   GST_OBJECT_FLAG_SET (clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
-#if GST_CHECK_VERSION(1,14,0)
+#if GLIB_CHECK_VERSION(2,58,0)
   GstAmlClockPrivate *priv = gst_aml_clock_get_instance_private (clock);
 #else
   GstAmlClockPrivate *priv = GST_AML_CLOCK_GET_PRIVATE (clock);

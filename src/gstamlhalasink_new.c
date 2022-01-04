@@ -329,7 +329,7 @@ gst_ahal_output_port_get_type (void)
 
 /* class initialization */
 #define gst_aml_hal_asink_parent_class parent_class
-#if GST_CHECK_VERSION(1,14,0)
+#if GLIB_CHECK_VERSION(2,58,0)
 G_DEFINE_TYPE_WITH_CODE (GstAmlHalAsink, gst_aml_hal_asink, GST_TYPE_BASE_SINK,
   GST_DEBUG_CATEGORY_INIT (gst_aml_hal_asink_debug_category, "amlhalasink", 0,
   "debug category for amlhalasink element");G_ADD_PRIVATE(GstAmlHalAsink));
@@ -400,7 +400,7 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   gstelement_class = (GstElementClass *) klass;
   gstbasesink_class = (GstBaseSinkClass *) klass;
 
-#if GST_CHECK_VERSION(1,14,0)
+#if GLIB_CHECK_VERSION(2,58,0)
 #else
   g_type_class_add_private (klass, sizeof (GstAmlHalAsinkPrivate));
 #endif
@@ -599,7 +599,7 @@ static void
 gst_aml_hal_asink_init (GstAmlHalAsink* sink)
 {
   GstBaseSink *basesink;
-#if GST_CHECK_VERSION(1,14,0)
+#if GLIB_CHECK_VERSION(2,58,0)
   GstAmlHalAsinkPrivate *priv = gst_aml_hal_asink_get_instance_private (sink);
 #else
   GstAmlHalAsinkPrivate *priv = GST_AML_HAL_ASINK_GET_PRIVATE (sink);
@@ -1021,7 +1021,7 @@ static gboolean
 gst_aml_hal_sink_get_mute (GstAmlHalAsink * sink)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
-  gboolean mute = 0;
+  bool mute = false;
   int ret;
 
   if (!priv->hw_dev_) {
@@ -1030,12 +1030,10 @@ gst_aml_hal_sink_get_mute (GstAmlHalAsink * sink)
   }
 
   ret = priv->hw_dev_->get_master_mute(priv->hw_dev_, &mute);
-  if (ret) {
+  if (ret)
     GST_ERROR_OBJECT(sink, "get_master_mute fail: %d",ret);
-    return mute;
-  }
-  GST_LOG_OBJECT (sink, "master mute:%d", mute);
 
+  GST_LOG_OBJECT (sink, "master mute:%d", mute);
   return mute;
 }
 
