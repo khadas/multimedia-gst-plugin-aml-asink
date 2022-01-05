@@ -194,8 +194,11 @@ struct _GstAmlHalAsinkPrivate
   /* ac4 config */
   int ac4_pres_group_idx;
   int ac4_pat;
+  int ac4_ass_type;
+  int ac4_mixer_gain;
   gchar *ac4_lang;
   gchar *ac4_lang2;
+  int ms12_mix_en;
 #endif
 #ifdef SUPPORT_AD
   gboolean is_dual_audio;
@@ -241,6 +244,9 @@ enum
   PROP_AC4_LANG_1,
   PROP_AC4_LANG_2,
   PROP_AC4_AUTO_S_PRI,
+  PROP_AC4_ASS_TYPE,
+  PROP_AC4_MIXER_BALANCE,
+  PROP_MS12_MIX_EN,
 #endif
 #ifdef SUPPORT_AD
   PROP_DUAL_AUDIO,
@@ -388,6 +394,9 @@ static int config_sys_node(const char* path, const char* value);
 #endif
 static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts);
 static void vol_ramp(guchar * data, gint size, int dir);
+#ifdef ENABLE_MS12
+static void hal_set_player_overwrite (GstAmlHalAsink * sink, gboolean defaults);
+#endif
 
 static void
 gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
@@ -509,17 +518,33 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AC4_AUTO_S_PRI,
       g_param_spec_string ("ac4-auto-selection-priority", "ac4 auto selection priority",
-        "language: Prefer selection by language associated_type: Prefer selection by associated type (default)", "associated_type", G_PARAM_WRITABLE));
+        "language: Prefer selection by language, associated_type: Prefer selection by associated type, default", "default", G_PARAM_WRITABLE));
 
   g_object_class_install_property (gobject_class, PROP_AC4_LANG_1,
       g_param_spec_string  ("ac4-preferred-lang1", "ac4 preferred lang1",
-        "1st Preferred Language code (3 Letter ISO 639)",
+        "1st Preferred Language code (3 Letter ISO 639), DEF for global setting",
         "null", G_PARAM_WRITABLE));
 
   g_object_class_install_property (gobject_class, PROP_AC4_LANG_2,
       g_param_spec_string  ("ac4-preferred-lang2", "ac4 preferred lang2",
-        "2nd Preferred Language code (3 Letter ISO 639)",
+        "2nd Preferred Language code (3 Letter ISO 639), DEF for global setting",
         "null", G_PARAM_WRITABLE));
+
+  g_object_class_install_property (gobject_class, PROP_AC4_ASS_TYPE,
+      g_param_spec_string ("ac4-associated-type", "ac4 associated type",
+        "Preferred associated type of service: default, visually_impaired, hearing_impaired, commentary",
+        "null", G_PARAM_WRITABLE));
+
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AC4_MIXER_BALANCE,
+      g_param_spec_int ("ac4-mixer-balance", "ac4 mixer balance",
+        "mixer gain control. -32(mute assoc) <--> 32(mute main), 255 for user default",
+        -32, 255, 255, G_PARAM_WRITABLE));
+
+  g_object_class_install_property (gobject_class,
+      PROP_MS12_MIX_EN,
+      g_param_spec_int ("ac4-associated-audio-mixing-enable", "ac4 associated audio mixing enable",
+        "enable disable ac4 associated audio, 0 (off), 1 (on), 255 (default)",
+        0, 255, 255, G_PARAM_WRITABLE));
 #endif
 #ifdef SUPPORT_AD
   g_object_class_install_property (gobject_class, PROP_DUAL_AUDIO,
@@ -630,9 +655,12 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->session_id = -1;
   priv->stream_volume = 1.0;
 #ifdef ENABLE_MS12
-  priv->ac4_pat = -1;
-  priv->ac4_pres_group_idx = -2;
+  priv->ac4_pat = 255;
+  priv->ac4_ass_type = 255;
+  priv->ac4_mixer_gain = 255;
+  priv->ac4_pres_group_idx = -1;
   priv->ac4_lang = priv->ac4_lang2 = NULL;
+  priv->ms12_mix_en = 255;
 #endif
 #ifdef SUPPORT_AD
   priv->des_ad.fade = priv->des_ad.pan = -1;
@@ -1062,6 +1090,9 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
 {
   GstAmlHalAsink *sink = GST_AML_HAL_ASINK (object);
   GstAmlHalAsinkPrivate *priv = sink->priv;
+#ifdef ENABLE_MS12
+  char setting[50];
+#endif
 
   switch (property_id) {
     case PROP_DIRECT_MODE:
@@ -1191,9 +1222,17 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       break;
 #ifdef ENABLE_MS12
     case PROP_AC4_P_GROUP_IDX:
+    {
       priv->ac4_pres_group_idx = g_value_get_int(value);
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "ms12_runtime=-ac4_pres_group_idx %d", priv->ac4_pres_group_idx);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
       GST_WARNING_OBJECT (sink, "ac4_pres_group_idx:%d", priv->ac4_pres_group_idx);
       break;
+    }
     case PROP_AC4_AUTO_S_PRI:
     {
       const gchar *pri = g_value_get_string (value);
@@ -1201,10 +1240,19 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         priv->ac4_pat = 0;
       else if (!strncmp ("associated_type", pri, sizeof ("associated_type")))
         priv->ac4_pat = 1;
-      else
+      else if (!strncmp ("default", pri, sizeof ("default")))
+        priv->ac4_pat = 255;
+      else {
         GST_ERROR_OBJECT (sink, "invalid value:%s", pri);
-      if (priv->ac4_pat != -1)
-        GST_WARNING_OBJECT (sink, "ac4_pat:%d", priv->ac4_pat);
+        priv->ac4_pat = 255;
+      }
+      GST_WARNING_OBJECT (sink, "ac4_pat:%d", priv->ac4_pat);
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "ms12_runtime=-pat_force %d", priv->ac4_pat);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
       break;
     }
     case PROP_AC4_LANG_1:
@@ -1221,6 +1269,12 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         priv->ac4_lang = NULL;
         break;
       }
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "ms12_runtime=-lang_force %s", priv->ac4_lang);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
       GST_WARNING_OBJECT (sink, "ac4_lang:%s", priv->ac4_lang);
       break;
     case PROP_AC4_LANG_2:
@@ -1237,8 +1291,62 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         priv->ac4_lang2 = NULL;
         break;
       }
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "ms12_runtime=-lang2_force %s", priv->ac4_lang2);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
       GST_WARNING_OBJECT (sink, "ac4_lang2:%s", priv->ac4_lang2);
       break;
+    case PROP_AC4_ASS_TYPE:
+    {
+      const gchar* type = g_value_get_string (value);
+      if (!strncmp(type, "visually_impaired", sizeof("visually_impaired")))
+        priv->ac4_ass_type = 1;
+      else if (!strncmp(type, "hearing_impaired", sizeof("hearing_impaired")))
+        priv->ac4_ass_type = 2;
+      else if (!strncmp(type, "commentary", sizeof("commentary")))
+        priv->ac4_ass_type = 3;
+      else if (!strncmp(type, "default", sizeof("default")))
+        priv->ac4_ass_type = 255;
+      else {
+        GST_ERROR_OBJECT (sink, "wrong ass type %s", type);
+        priv->ac4_ass_type = 255;
+      }
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "ms12_runtime=-at_force %d", priv->ac4_ass_type);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
+      GST_WARNING_OBJECT (sink, "ac4_ass_type:%d", priv->ac4_ass_type);
+      break;
+    }
+    case PROP_AC4_MIXER_BALANCE:
+    {
+      priv->ac4_mixer_gain = g_value_get_int(value);
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "ms12_runtime=-xu_force %d", priv->ac4_mixer_gain);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
+      GST_WARNING_OBJECT (sink, "ac4_mixer_gain:%d", priv->ac4_mixer_gain);
+      break;
+    }
+    case PROP_MS12_MIX_EN:
+    {
+      priv->ms12_mix_en = g_value_get_int(value);
+      GST_OBJECT_LOCK (sink);
+      if (priv->hw_dev_) {
+        snprintf(setting, sizeof(setting), "associate_audio_mixing_enable_force=%d", priv->ms12_mix_en);
+        priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+      }
+      GST_OBJECT_UNLOCK (sink);
+      GST_WARNING_OBJECT (sink, "ms12 mix enable:%d", priv->ms12_mix_en);
+      break;
+    }
 #endif
 #ifdef SUPPORT_AD
     case PROP_DUAL_AUDIO:
@@ -2554,6 +2662,12 @@ static void resMgrNotify(EssRMgr *rm, int event, int type, int id, void* userDat
       switch (event) {
         case EssRMgrEvent_revoked:
         {
+#ifdef ENABLE_MS12
+          GST_OBJECT_LOCK (sink);
+          if (priv->format_ == AUDIO_FORMAT_AC4)
+            hal_set_player_overwrite(sink, TRUE);
+          GST_OBJECT_UNLOCK (sink);
+#endif
           GST_WARNING_OBJECT (sink, "releasing audio decoder %d", id);
           paused_to_ready (sink);
 
@@ -2641,12 +2755,13 @@ gst_aml_hal_asink_change_state (GstElement * element,
         priv->session_id = gst_aml_clock_get_session_id(priv->provided_clock);
       GST_WARNING_OBJECT(sink, "avsync session %d", priv->session_id);
 
+      GST_OBJECT_LOCK (sink);
       if (!gst_aml_hal_asink_open (sink)) {
+        GST_OBJECT_UNLOCK (sink);
         GST_ERROR_OBJECT(sink, "asink open failure");
         goto open_failed;
       }
 
-      GST_OBJECT_LOCK (sink);
       if (!hal_open_device (sink)) {
         GST_OBJECT_UNLOCK (sink);
         goto open_failed;
@@ -2739,6 +2854,10 @@ gst_aml_hal_asink_change_state (GstElement * element,
     case GST_STATE_CHANGE_READY_TO_NULL:
       GST_INFO_OBJECT(sink, "ready to null");
       GST_OBJECT_LOCK (sink);
+#ifdef ENABLE_MS12
+      if (priv->format_ == AUDIO_FORMAT_AC4)
+        hal_set_player_overwrite(sink, TRUE);
+#endif
       hal_close_device (sink);
 
 #ifdef ESSOS_RM
@@ -2965,7 +3084,7 @@ aml_open_output_stream (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
     char setting[50];
 
     flag |= AUDIO_OUTPUT_FLAG_AD_STREAM;
-    snprintf(setting, sizeof(setting), "associate_audio_mixing_enable=1");
+    snprintf(setting, sizeof(setting), "associate_audio_mixing_enable_force=1");
     priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
   }
 #endif
@@ -2994,26 +3113,7 @@ aml_open_output_stream (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
 
 #ifdef ENABLE_MS12
   if (priv->format_ == AUDIO_FORMAT_AC4)
-  {
-    char setting[50];
-    /*ac4 setting */
-    if (priv->ac4_lang) {
-      snprintf(setting, sizeof(setting), "ms12_runtime=-lang %s", priv->ac4_lang);
-      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-    }
-    if (priv->ac4_lang2) {
-      snprintf(setting, sizeof(setting), "ms12_runtime=-lang2 %s", priv->ac4_lang2);
-      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-    }
-    if (priv->ac4_pat != -1) {
-      snprintf(setting, sizeof(setting), "ms12_runtime=-pat %d", priv->ac4_pat);
-      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-    }
-    if (priv->ac4_pres_group_idx != -2) {
-      snprintf(setting, sizeof(setting), "ms12_runtime=-ac4_pres_group_idx %d", priv->ac4_pres_group_idx);
-      priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-    }
-  }
+    hal_set_player_overwrite(sink, FALSE);
 #endif
 
   GST_DEBUG_OBJECT (sink, "done");
@@ -3061,7 +3161,7 @@ static gboolean hal_release (GstAmlHalAsink * sink)
   if (priv->is_ad_audio) {
     char setting[50];
 
-    snprintf(setting, sizeof(setting), "associate_audio_mixing_enable=0");
+    snprintf(setting, sizeof(setting), "associate_audio_mixing_enable_force=255");
     priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
   }
 #endif
@@ -3674,6 +3774,32 @@ static uint32_t hal_get_latency (GstAmlHalAsink * sink)
   GST_DEBUG_OBJECT (sink, "latency %u", latency);
   return latency;
 }
+
+#ifdef ENABLE_MS12
+static void hal_set_player_overwrite(GstAmlHalAsink * sink, gboolean defaults)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+  char setting[50];
+
+  if (!priv->hw_dev_)
+    return;
+  /*ac4 setting */
+  snprintf(setting, sizeof(setting), "ms12_runtime=-lang_force %s", defaults ? "DEF" : priv->ac4_lang);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-lang2_force %s", defaults ? "DEF" : priv->ac4_lang2);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-pat_force %d", defaults ? 255 : priv->ac4_pat);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-ac4_pres_group_idx %d", defaults ? -1 : priv->ac4_pres_group_idx);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-at_force %d", defaults ? 255 : priv->ac4_ass_type);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-xu_force %d", defaults ? 255 : priv->ac4_mixer_gain);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+  snprintf(setting, sizeof(setting), "associate_audio_mixing_enable_force=%d", defaults ? 255 : priv->ms12_mix_en);
+  priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
+}
+#endif
 
 GstClock *gst_aml_hal_asink_get_clock (GstElement *element)
 {
