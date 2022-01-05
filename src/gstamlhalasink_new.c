@@ -42,9 +42,14 @@
 #include "aml_avsync.h"
 #include "aml_avsync_log.h"
 
+#ifdef MEDIA_SYNC
+#include "MediaSyncInterface.h"
+#endif
+
 #ifdef ESSOS_RM
 #include "essos-resmgr.h"
 #endif
+
 #ifdef SUPPORT_AD
 #include "gstmetapesheader.h"
 #include "pes_private_data.h"
@@ -260,6 +265,14 @@ enum
   SIGNAL_XRUN,
   SIGNAL_AUDSWITCH,
   MAX_SIGNAL
+};
+
+enum
+{
+  AV_SYNC_TYPE_NULL = 0,
+  AV_SYNC_TYPE_TSYNC = 1,
+  AV_SYNC_TYPE_MSYNC = 2,
+  AV_SYNC_TYPE_MEDIASYNC = 3,
 };
 
 #define COMMON_AUDIO_CAPS \
@@ -1992,8 +2005,10 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         scaletempo_update_segment (&priv->st, &priv->segment);
 
       /* create avsync before rate change */
+#ifndef MEDIA_SYNC
       if (!priv->avsync && priv->direct_mode_ && !bypass_avs) {
-        char setting[20];
+        char id_setting[20] = {0};
+        char type_setting[20] = {0};
         struct start_policy policy;
 
         if (priv->seamless_switch || priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
@@ -2021,11 +2036,24 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         }
         /* set session into hwsync id */
         g_mutex_lock(&priv->feed_lock);
-        snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
-        if (priv->stream_)
-          priv->stream_->common.set_parameters (&priv->stream_->common, setting);
+        snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MSYNC);
+        snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
+        priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+        priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
         g_mutex_unlock(&priv->feed_lock);
       }
+#else
+      if (priv->direct_mode_) {
+        char id_setting[20] = {0};
+        char type_setting[20] = {0};
+        g_mutex_lock(&priv->feed_lock);
+        snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MEDIASYNC);
+        snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
+        priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+        priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+        g_mutex_unlock(&priv->feed_lock);
+      }
+#endif
 
       if (priv->direct_mode_) {
         if (!priv->tempo_used && segment.rate != 1.0)

@@ -122,6 +122,15 @@ AC_ARG_ENABLE([ad],
 esac],[ad=false])
 AM_CONDITIONAL([AD], [test x${ad} = xtrue])
 
+AC_ARG_ENABLE([mediasync],
+[  --enable-mediasync support media sync],
+[case "${enableval}" in
+  yes) mediasync=true ;;
+  no)  mediasync=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-mediasync]) ;;
+esac],[mediasync=false])
+AM_CONDITIONAL([MEDIA_SYNC], [test x${mediasync} = xtrue])
+
 dnl set proper LDFLAGS for plugins
 GST_PLUGIN_LDFLAGS='-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\).*'
 AC_SUBST(GST_PLUGIN_LDFLAGS)
