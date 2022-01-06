@@ -1509,9 +1509,9 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     || g_str_equal (mimetype, "audio/x-gst-fourcc-dtse")
     || g_str_equal (mimetype, "audio/x-dtsl")) {
     /* if cannot extract the needed information from the cap, set default value */
-    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)) || info.rate <= 0)
         info.rate = 48000;
-    if (!gst_structure_get_int (structure, "channels", &info.channels))
+    if (!gst_structure_get_int (structure, "channels", &info.channels) || info.channels <= 0)
         info.channels = 2;
     spec->type = GST_AUDIO_RING_BUFFER_FORMAT_TYPE_DTS;
     info.bpf = 1;
