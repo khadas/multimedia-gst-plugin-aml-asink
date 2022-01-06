@@ -2068,8 +2068,18 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         GST_INFO_OBJECT (sink, "rate to %f", segment.rate);
 
         /* some loop playback will set this flag after EOS */
-        if (segment.flags & GST_SEGMENT_FLAG_RESET) {
-          gst_aml_hal_asink_reset_sync (sink, TRUE);
+        if ((segment.flags & GST_SEGMENT_FLAG_RESET) && priv->spec.caps) {
+          priv->eos_time = -1;
+          priv->received_eos = FALSE;
+          priv->eos = FALSE;
+          priv->last_ts = GST_CLOCK_TIME_NONE;
+          priv->flushing_ = FALSE;
+          priv->first_pts_set = FALSE;
+          priv->wrapping_time = 0;
+          priv->last_pcr = 0;
+          priv->quit_clock_wait = FALSE;
+          priv->group_done = FALSE;
+
           /* rebuild audio stream */
           gst_aml_hal_asink_setcaps(sink, priv->spec.caps, TRUE);
         }
@@ -2234,6 +2244,7 @@ after_eos:
   }
 }
 
+#ifdef ENABLE_XRUN_DETECTION
 static gpointer xrun_thread(gpointer para)
 {
   GstAmlHalAsink *sink = (GstAmlHalAsink *)para;
@@ -2313,6 +2324,7 @@ static int start_xrun_thread (GstAmlHalAsink * sink)
   }
   return 0;
 }
+#endif
 
 static void stop_xrun_thread (GstAmlHalAsink * sink)
 {
