@@ -387,7 +387,8 @@ static GstFlowReturn gst_aml_hal_asink_wait_event(GstBaseSink * bsink,
     GstEvent * event);
 static void gst_aml_hal_asink_get_times(GstBaseSink * bsink,
     GstBuffer * buffer, GstClockTime * start, GstClockTime * end);
-static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink * sink, GstCaps * caps);
+static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink * sink,
+    GstCaps * caps, gboolean force_change);
 
 static gboolean hal_open_device (GstAmlHalAsink * sink);
 static gboolean hal_close_device (GstAmlHalAsink* sink);
@@ -1578,7 +1579,8 @@ static gboolean caps_not_changed(GstAmlHalAsink *sink, GstCaps * cur, GstCaps * 
   return ret;
 }
 
-static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
+static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink,
+    GstCaps * caps, gboolean force_change)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GstAudioRingBufferSpec *spec;
@@ -1586,7 +1588,8 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
 
   spec = &priv->spec;
 
-  if (G_UNLIKELY (spec->caps && caps_not_changed (sink, spec->caps, caps))) {
+  if (!force_change &&
+      G_UNLIKELY (spec->caps && caps_not_changed (sink, spec->caps, caps))) {
     GST_DEBUG_OBJECT (sink,
         "caps haven't changed, skipping reconfiguration");
     return TRUE;
@@ -1651,8 +1654,10 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink, GstCaps * caps)
     priv->tempo_used = TRUE;
     scaletempo_start (&priv->st);
     scaletempo_set_info (&priv->st, &spec->info);
-  } else if (priv->tempo_disable)
+  } else {
+    scaletempo_stop (&priv->st);
     priv->tempo_used = FALSE;
+  }
 
   gst_element_post_message (GST_ELEMENT_CAST (sink),
       gst_message_new_latency (GST_OBJECT (sink)));
@@ -2061,6 +2066,13 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         else
           priv->need_update_rate = TRUE;
         GST_INFO_OBJECT (sink, "rate to %f", segment.rate);
+
+        /* some loop playback will set this flag after EOS */
+        if (segment.flags & GST_SEGMENT_FLAG_RESET) {
+          gst_aml_hal_asink_reset_sync (sink, TRUE);
+          /* rebuild audio stream */
+          gst_aml_hal_asink_setcaps(sink, priv->spec.caps, TRUE);
+        }
       }
       break;
     }
@@ -2163,7 +2175,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
 
       gst_event_parse_caps (event, &caps);
       if (caps) {
-        result = gst_aml_hal_asink_setcaps(sink, caps);
+        result = gst_aml_hal_asink_setcaps(sink, caps, FALSE);
         GST_DEBUG_OBJECT (sink, "set caps ret %d", result);
       } else {
         result = FALSE;
@@ -2464,7 +2476,6 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
     if (!gst_buffer_get_size(buf)) {
       /* lenth 0 can not be commited */
-      priv->render_samples += samples;
       GST_OBJECT_UNLOCK (sink);
       GST_LOG_OBJECT (sink, "skip length 0 buff");
       goto done;
