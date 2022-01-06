@@ -2067,6 +2067,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           priv->need_update_rate = TRUE;
         GST_INFO_OBJECT (sink, "rate to %f", segment.rate);
 
+#if 0
         /* some loop playback will set this flag after EOS */
         if ((segment.flags & GST_SEGMENT_FLAG_RESET) && priv->spec.caps) {
           priv->eos_time = -1;
@@ -2083,6 +2084,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           /* rebuild audio stream */
           gst_aml_hal_asink_setcaps(sink, priv->spec.caps, TRUE);
         }
+#endif
       }
       break;
     }
