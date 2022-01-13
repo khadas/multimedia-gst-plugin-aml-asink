@@ -2166,6 +2166,12 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       if (!priv->group_done) {
         GstClockReturn cret;
 
+        GST_OBJECT_LOCK (sink);
+        if (priv->xrun_timer) {
+          g_timer_start (priv->xrun_timer);
+          g_timer_stop (priv->xrun_timer);
+        }
+        GST_OBJECT_UNLOCK (sink);
         cret = sink_wait_clock (sink, wait_end, duration);
         priv->eos_end_time = wait_end;
         GST_DEBUG_OBJECT (sink, "event-gap wait %d", cret);
