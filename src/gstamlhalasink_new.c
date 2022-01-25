@@ -2703,6 +2703,7 @@ static void paused_to_ready(GstAmlHalAsink *sink)
   GST_OBJECT_LOCK (sink);
   hal_release (sink);
   priv->quit_clock_wait = TRUE;
+  priv->paused_ = FALSE;
 
   gst_aml_hal_asink_reset_sync (sink, FALSE);
 
@@ -3209,7 +3210,6 @@ static gboolean hal_release (GstAmlHalAsink * sink)
   if (priv->stream_) {
     priv->hw_dev_->close_output_stream(priv->hw_dev_, priv->stream_);
     priv->stream_ = NULL;
-    priv->paused_ = FALSE;
     priv->render_samples = 0;
   }
   g_mutex_unlock(&priv->feed_lock);
