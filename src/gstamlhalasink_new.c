@@ -2512,7 +2512,6 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   if (samples == 0)
     samples = 1;
 
-  priv->render_samples += samples;
   gst_buffer_map (buf, &info, GST_MAP_READ);
   data = info.data;
   size = info.size;
@@ -2522,6 +2521,9 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   /* blocked on paused */
   while (priv->paused_ && !priv->flushing_)
     g_cond_wait (&priv->run_ready, &priv->feed_lock);
+
+  /* update render_samples after pause logic */
+  priv->render_samples += samples;
 
   if (priv->flushing_) {
     GST_DEBUG_OBJECT (sink, "interrupted by stop");
