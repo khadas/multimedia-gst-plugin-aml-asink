@@ -1189,7 +1189,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       break;
     case PROP_DISABLE_XRUN_TIMER:
       priv->disable_xrun = g_value_get_boolean(value);
-      GST_WARNING_OBJECT (sink, "disable xrun %d", priv->disable_xrun);
+      GST_WARNING_OBJECT (sink, "disable xrun pause %d", priv->disable_xrun);
       break;
     case PROP_GAP_START_PTS:
       priv->gap_start_pts = g_value_get_int64(value);
@@ -2293,9 +2293,12 @@ static gpointer xrun_thread(gpointer para)
         priv->eos = TRUE;
         GST_OBJECT_UNLOCK (sink);
       } else {
-        GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-        hal_pause (sink);
+        if (!priv->disable_xrun) {
+          hal_pause (sink);
+          GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+        }
         g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+        GST_WARNING_OBJECT (sink, "xrun signaled");
       }
       g_timer_start(priv->xrun_timer);
       g_timer_stop(priv->xrun_timer);
@@ -2635,7 +2638,7 @@ commit_done:
   GST_OBJECT_LOCK (sink);
   if (priv->sync_mode == AV_SYNC_MODE_AMASTER &&
         priv->stream_ && !priv->xrun_thread &&
-        !priv->disable_xrun && start_xrun_thread (sink)) {
+        start_xrun_thread (sink)) {
     ret = GST_FLOW_ERROR;
     GST_OBJECT_UNLOCK (sink);
     goto done;
