@@ -400,6 +400,7 @@ static gboolean hal_stop (GstAmlHalAsink * sink);
 static guint hal_commit (GstAmlHalAsink * sink, guchar * data, gint size, guint64 pts_64);
 static uint32_t hal_get_latency (GstAmlHalAsink * sink);
 static void dump(const char* path, const uint8_t *data, int size);
+static int create_av_sync(GstAmlHalAsink *sink);
 #if 0
 static int get_sysfs_uint32(const char *path, uint32_t *value);
 static int config_sys_node(const char* path, const char* value);
@@ -1584,7 +1585,6 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink,
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GstAudioRingBufferSpec *spec;
-  gboolean bypass_avs = FALSE;
 
   spec = &priv->spec;
 
@@ -1621,25 +1621,8 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink,
   }
   GST_OBJECT_UNLOCK (sink);
 
-#ifdef SUPPORT_AD
-  if (priv->is_ad_audio)
-    bypass_avs = TRUE;
-#endif
-
-  if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER && !bypass_avs) {
-    char setting[20];
-    priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
-    if (!priv->avsync) {
-      GST_ERROR_OBJECT (sink, "create av sync fail");
-      return FALSE;
-    }
-    g_mutex_lock(&priv->feed_lock);
-    /* set session into hwsync id */
-    snprintf(setting, sizeof(setting), "hw_av_sync=%d", priv->session_id);
-    if (priv->stream_)
-      priv->stream_->common.set_parameters (&priv->stream_->common, setting);
-    g_mutex_unlock(&priv->feed_lock);
-  }
+  if (create_av_sync(sink))
+    return FALSE;
 
   if (priv->stream_volume_pending) {
     priv->stream_volume_pending = FALSE;
@@ -1893,6 +1876,70 @@ static int update_avsync_speed(GstAmlHalAsink *sink, float rate)
   return rc;
 }
 
+static int create_av_sync(GstAmlHalAsink *sink)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+#ifndef MEDIA_SYNC
+  if (!priv->avsync && priv->direct_mode_) {
+    char id_setting[20] = {0};
+    char type_setting[20] = {0};
+    struct start_policy policy;
+
+#ifdef SUPPORT_AD
+    if (priv->is_ad_audio)
+      return 0;
+#endif
+
+    if (priv->seamless_switch || priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
+      priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
+    } else {
+      priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
+    }
+    if (!priv->avsync) {
+      GST_ERROR_OBJECT (sink, "create av sync fail");
+      return -1;
+    }
+    if (priv->seamless_switch)
+    {
+      GST_INFO_OBJECT (sink, "SET AVSYNC audio switch to ALIGN mode");
+      policy.policy = AV_SYNC_START_ALIGN;
+      policy.timeout = -1;
+      avs_sync_set_start_policy (priv->avsync, &policy);
+    }
+
+    if (priv->wait_video) {
+      policy.policy = AV_SYNC_START_ALIGN;
+      policy.timeout = priv->aligned_timeout;
+      GST_INFO_OBJECT (sink, "set policy=align,  timeout=%d", policy.timeout);
+      avs_sync_set_start_policy (priv->avsync, &policy);
+    }
+    /* set session into hwsync id */
+    g_mutex_lock(&priv->feed_lock);
+    snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MSYNC);
+    snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
+    priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+    priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    g_mutex_unlock(&priv->feed_lock);
+  } else {
+    GST_INFO_OBJECT (sink, "no need to create av sync, direct: %d",
+        priv->direct_mode_);
+  }
+#else
+  if (priv->direct_mode_) {
+    char id_setting[20] = {0};
+    char type_setting[20] = {0};
+    g_mutex_lock(&priv->feed_lock);
+    snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MEDIASYNC);
+    snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
+    priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+    priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    g_mutex_unlock(&priv->feed_lock);
+  }
+#endif
+  return 0;
+}
+
 static gboolean
 gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
 {
@@ -1974,7 +2021,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     case GST_EVENT_SEGMENT:
     {
       GstSegment segment;
-      gboolean bypass_avs = FALSE;
       gst_event_copy_segment (event, &segment);
       GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
               &segment);
@@ -2001,64 +2047,12 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
         priv->segment.rate = segment.rate;
       }
 
-#ifdef SUPPORT_AD
-      if (priv->is_ad_audio)
-        bypass_avs = TRUE;
-#endif
-
       if (priv->tempo_used)
         scaletempo_update_segment (&priv->st, &priv->segment);
 
       /* create avsync before rate change */
-#ifndef MEDIA_SYNC
-      if (!priv->avsync && priv->direct_mode_ && !bypass_avs) {
-        char id_setting[20] = {0};
-        char type_setting[20] = {0};
-        struct start_policy policy;
-
-        if (priv->seamless_switch || priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
-          priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
-        } else {
-          priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
-        }
-        if (!priv->avsync) {
-          GST_ERROR_OBJECT (sink, "create av sync fail");
-          break;
-        }
-        if (priv->seamless_switch)
-        {
-           GST_INFO_OBJECT (sink, "SET AVSYNC audio switch to ALIGN mode");
-           policy.policy = AV_SYNC_START_ALIGN;
-           policy.timeout = -1;
-           avs_sync_set_start_policy (priv->avsync, &policy);
-        }
-
-        if (priv->wait_video) {
-          policy.policy = AV_SYNC_START_ALIGN;
-          policy.timeout = priv->aligned_timeout;
-          GST_INFO_OBJECT (sink, "set policy=align,  timeout=%d", policy.timeout);
-          avs_sync_set_start_policy (priv->avsync, &policy);
-        }
-        /* set session into hwsync id */
-        g_mutex_lock(&priv->feed_lock);
-        snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MSYNC);
-        snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
-        priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
-        priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
-        g_mutex_unlock(&priv->feed_lock);
-      }
-#else
-      if (priv->direct_mode_) {
-        char id_setting[20] = {0};
-        char type_setting[20] = {0};
-        g_mutex_lock(&priv->feed_lock);
-        snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MEDIASYNC);
-        snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
-        priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
-        priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
-        g_mutex_unlock(&priv->feed_lock);
-      }
-#endif
+      if (create_av_sync(sink))
+        break;
 
       if (priv->direct_mode_) {
         if (!priv->tempo_used && segment.rate != 1.0)
