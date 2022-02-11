@@ -807,7 +807,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
       return FALSE;
 
   if (pcr == -1) {
-    if (priv->paused_) {
+    if (priv->paused_ && priv->last_pcr != -1) {
       pcr = priv->last_pcr;
       GST_LOG_OBJECT (sink, "paused, return last %u", pcr);
     } else {
@@ -1690,7 +1690,7 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
   priv->flushing_ = FALSE;
   priv->first_pts_set = FALSE;
   priv->wrapping_time = 0;
-  priv->last_pcr = 0;
+  priv->last_pcr = -1;
   gst_caps_replace (&priv->spec.caps, NULL);
   priv->segment.rate = 1.0f;
   priv->gap_state = GAP_IDLE;
