@@ -826,7 +826,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     gint64 timepassed2, diff;
 
     /* for live streaming need to consider PTS wrapping */
-    if (priv->last_pcr > 0xFFFF0000 && pcr < 10*PTS_90K) {
+    if (priv->last_pcr != -1 && priv->last_pcr > 0xFFFF0000 && pcr < 10*PTS_90K) {
       priv->wrapping_time++;
       GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
     }
