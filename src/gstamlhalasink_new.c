@@ -830,7 +830,8 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
       priv->wrapping_time++;
       GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
     }
-    priv->last_pcr = pcr;
+    if (pcr != -1)
+      priv->last_pcr = pcr;
 
     if (!priv->wrapping_time)
       timepassed_90k = pcr - priv->first_pts;
@@ -2266,7 +2267,7 @@ static gpointer xrun_thread(gpointer para)
         }
     }
     if (!priv->xrun_paused &&
-           g_timer_elapsed(priv->xrun_timer, NULL) > 0.7) {
+           g_timer_elapsed(priv->xrun_timer, NULL) > 0.4) {
 #ifdef ENABLE_MS12
       char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
               "main_input_underrun");
