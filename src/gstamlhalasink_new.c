@@ -3348,11 +3348,14 @@ static gboolean hal_pause (GstAmlHalAsink * sink)
     return TRUE;
   }
 
+  /* set paused_ before pause() to make sure get position
+   * returns correct value
+   */
+  priv->paused_ = TRUE;
   ret = priv->stream_->pause(priv->stream_);
   if (ret)
     GST_WARNING_OBJECT (sink, "pause failure:%d", ret);
 
-  priv->paused_ = TRUE;
   g_mutex_unlock(&priv->feed_lock);
   GST_INFO_OBJECT (sink, "done");
   return TRUE;
