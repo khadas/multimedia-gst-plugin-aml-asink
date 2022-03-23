@@ -1751,7 +1751,8 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink,
       ret = GST_CLOCK_OK;
       break;
     }
-    if (now < time - GST_MSECOND) {
+    if ((time > GST_MSECOND && now < time - GST_MSECOND) ||
+        (time <= GST_MSECOND && now > GST_MSECOND)) {
       if (priv->quit_clock_wait) {
         ret = GST_CLOCK_UNSCHEDULED;
         break;
