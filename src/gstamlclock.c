@@ -190,3 +190,8 @@ gst_aml_clock_get_internal_time (GstClock * clock)
 
   return result;
 }
+
+GstClockTime gst_aml_clock_get_time (GstClock * clock)
+{
+  return gst_aml_clock_get_internal_time (clock);
+}
