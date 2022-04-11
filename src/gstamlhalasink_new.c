@@ -168,6 +168,7 @@ struct _GstAmlHalAsinkPrivate
   gboolean disable_xrun;
 
 #ifdef ESSOS_RM
+  GMutex  ess_lock;
   EssRMgr *rm;
   int resAssignedId;
 #endif
@@ -696,6 +697,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
     }
   }
 #ifdef ESSOS_RM
+  g_mutex_init (&priv->ess_lock);
   priv->rm = 0;
   priv->resAssignedId = -1;
 #endif
@@ -716,6 +718,9 @@ gst_aml_hal_asink_dispose (GObject * object)
 
   g_mutex_clear (&priv->feed_lock);
   g_cond_clear (&priv->run_ready);
+#ifdef ESSOS_RM
+  g_mutex_clear (&priv->ess_lock);
+#endif
 #ifdef ENABLE_MS12
   g_free (priv->ac4_lang);
   g_free (priv->ac4_lang2);
@@ -2737,11 +2742,14 @@ static void resMgrNotify(EssRMgr *rm, int event, int type, int id, void* userDat
           GST_WARNING_OBJECT (sink, "releasing audio decoder %d", id);
           paused_to_ready (sink);
 
-          GST_OBJECT_LOCK (sink);
-          EssRMgrReleaseResource (priv->rm, EssRMgrResType_audioDecoder, id);
-          priv->resAssignedId = -1;
-          GST_OBJECT_UNLOCK (sink);
-
+#ifdef ESSOS_RM
+          g_mutex_lock(&priv->ess_lock);
+          if (priv->rm) {
+            EssRMgrReleaseResource (priv->rm, EssRMgrResType_audioDecoder, id);
+            priv->resAssignedId = -1;
+          }
+          g_mutex_unlock(&priv->ess_lock);
+#endif
           GST_DEBUG_OBJECT (sink, "done releasing audio decoder %d", id);
           break;
         }
@@ -2926,17 +2934,6 @@ gst_aml_hal_asink_change_state (GstElement * element,
 #endif
       hal_close_device (sink);
 
-#ifdef ESSOS_RM
-      if (priv->rm) {
-         if (priv->resAssignedId >= 0) {
-            EssRMgrReleaseResource (priv->rm,
-                EssRMgrResType_audioDecoder, priv->resAssignedId);
-            priv->resAssignedId = -1;
-         }
-         EssRMgrDestroy (priv->rm);
-         priv->rm = 0;
-      }
-#endif
       gst_aml_hal_asink_close (sink);
 
       priv->gap_state = GAP_IDLE;
@@ -2946,6 +2943,20 @@ gst_aml_hal_asink_change_state (GstElement * element,
       scaletempo_init (&priv->st);
 
       GST_OBJECT_UNLOCK (sink);
+
+#ifdef ESSOS_RM
+      g_mutex_lock(&priv->ess_lock);
+      if (priv->rm) {
+         if (priv->resAssignedId >= 0) {
+            EssRMgrReleaseResource (priv->rm,
+                EssRMgrResType_audioDecoder, priv->resAssignedId);
+            priv->resAssignedId = -1;
+         }
+         EssRMgrDestroy (priv->rm);
+         priv->rm = 0;
+      }
+      g_mutex_unlock(&priv->ess_lock);
+#endif
       break;
     default:
       break;
