@@ -82,6 +82,7 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_AUDIO_FORMAT_TYPE_LPCM_TS 104
 #define PTS_90K 90000
 #define HAL_INVALID_PTS (GST_CLOCK_TIME_NONE - 1)
+static const char kCustomInstantRateChangeEventName[] = "custom-instant-rate-change";
 
 #ifdef DUMP_TO_FILE
 static guint file_index;
@@ -2194,6 +2195,44 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       } else {
         result = FALSE;
       }
+      break;
+    }
+    case GST_EVENT_CUSTOM_DOWNSTREAM_OOB:
+    {
+      gboolean got_rate = false;
+      gdouble rate;
+
+      const GstStructure* s = gst_event_get_structure (event);
+      if (s && gst_structure_has_name (s, kCustomInstantRateChangeEventName)) {
+        const GValue *v = gst_structure_get_value (s, "rate");
+        if (v) {
+          rate = g_value_get_double (v);
+          got_rate = true;
+        }
+      }
+
+      if (!got_rate)
+        break;
+
+      GST_OBJECT_LOCK (sink);
+      if (!priv->avsync) {
+        GST_ERROR_OBJECT (sink, "segment event not received yet");
+        GST_OBJECT_UNLOCK (sink);
+        break;
+      }
+      if (priv->tempo_used) {
+        priv->segment.rate = rate;
+        scaletempo_update_segment (&priv->st, &priv->segment);
+      }
+
+      if (priv->direct_mode_) {
+        if (!priv->tempo_used && rate != 1.0)
+          update_avsync_speed(sink, rate);
+        else
+          priv->need_update_rate = TRUE;
+        GST_INFO_OBJECT (sink, "rate to %f", rate);
+      }
+      GST_OBJECT_UNLOCK (sink);
       break;
     }
     default:
