@@ -41,6 +41,7 @@
 #include "scaletempo.h"
 #include "aml_avsync.h"
 #include "aml_avsync_log.h"
+#include "aml_version.h"
 
 #ifdef MEDIA_SYNC
 #include "MediaSyncInterface.h"
