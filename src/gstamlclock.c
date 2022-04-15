@@ -41,10 +41,6 @@ struct _GstAmlClockPrivate
 
   int session;
   int session_id;
-
-#ifdef MEDIA_SYNC
-  void *media_sync_handle;
-#endif
 };
 
 #define parent_class gst_aml_clock_parent_class
@@ -92,8 +88,8 @@ gst_aml_clock_init (GstAmlClock * clock)
   priv->session_id = -1;
 
 #ifdef MEDIA_SYNC
-  priv->media_sync_handle = MediaSync_create();
-  priv->session = MediaSync_allocInstance(priv->media_sync_handle, 0, 0, &priv->session_id);
+  clock->handle = MediaSync_create();
+  priv->session = MediaSync_allocInstance(clock->handle, 0, 0, &priv->session_id);
   FILE * fp;
   fp = fopen("/data/MediaSyncId", "w");
   if (fp == NULL) {
@@ -103,6 +99,7 @@ gst_aml_clock_init (GstAmlClock * clock)
     fclose(fp);
   }
 #else
+  clock->handle = NULL;
   priv->session = av_sync_open_session(&priv->session_id);
 #endif
 
@@ -122,13 +119,14 @@ gst_aml_clock_dispose (GObject * object)
     priv->destroy_notify (priv->user_data);
   priv->destroy_notify = NULL;
   priv->user_data = NULL;
-  if (priv->session >= 0)
-    av_sync_close_session(priv->session);
 
 #ifdef MEDIA_SYNC
-  if (priv->media_sync_handle) {
-    MediaSync_destroy(priv->media_sync_handle);
+  if (clock->handle) {
+    MediaSync_destroy(clock->handle);
   }
+#else
+  if (priv->session >= 0)
+    av_sync_close_session(priv->session);
 #endif
 
   G_OBJECT_CLASS (parent_class)->dispose (object);

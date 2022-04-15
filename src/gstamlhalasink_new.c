@@ -795,60 +795,58 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     return TRUE;
   }
 
-  if (!priv->avsync) {
+  if (!priv->provided_clock) {
     //TODO(song): get HAL position
     *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
-    GST_LOG_OBJECT (sink, "POSITION: %" GST_TIME_FORMAT, GST_TIME_ARGS (*cur));
-    if (GST_FORMAT_TIME != format) {
-      gboolean ret;
+  } else {
 
-      /* convert to final format */
-      ret = gst_audio_info_convert (&priv->spec.info, GST_FORMAT_TIME, *cur, format, cur);
-      if (!ret)
+#ifdef MEDIA_SYNC
+    GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
+
+    if (aclock->handle) {
+      MediaSync_getMediaTime(aclock->handle, -1, cur, false);
+      *cur = gst_util_uint64_scale_int(*cur, GST_SECOND, GST_MSECOND);
+    }
+#else
+    rc = avsync_get_time(sink, &pcr);
+    if (rc)
         return FALSE;
-    }
-    return TRUE;
-  }
 
-  rc = avsync_get_time(sink, &pcr);
-  if (rc)
-      return FALSE;
-
-  if (pcr == -1) {
-    if (priv->paused_ && priv->last_pcr != -1) {
-      pcr = priv->last_pcr;
-      GST_LOG_OBJECT (sink, "paused, return last %u", pcr);
-    } else {
-      pcr = priv->first_pts;
-      GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
-    }
-  } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
+    if (pcr == -1) {
+      if (priv->paused_ && priv->last_pcr != -1) {
+        pcr = priv->last_pcr;
+        GST_LOG_OBJECT (sink, "paused, return last %u", pcr);
+      } else {
+        pcr = priv->first_pts;
+        GST_LOG_OBJECT (sink, "render not start, set to first_pts %u", pcr);
+      }
+    } else if (priv->first_pts_set && (int)(priv->first_pts - pcr) > 0 &&
                 (int)(priv->first_pts - pcr) < 90000 &&
                 priv->sync_mode == AV_SYNC_MODE_AMASTER) {
-    pcr = priv->first_pts;
-    GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
-  }
-
-  if (priv->sync_mode != AV_SYNC_MODE_PCR_MASTER) {
-    gint64 timepassed2, diff;
-
-    /* for live streaming need to consider PTS wrapping */
-    if (priv->last_pcr != -1 && priv->last_pcr > 0xFFFF0000 && pcr < 10*PTS_90K) {
-      priv->wrapping_time++;
-      GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
+      pcr = priv->first_pts;
+      GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
     }
-    if (pcr != -1)
-      priv->last_pcr = pcr;
 
-    if (!priv->wrapping_time)
-      timepassed_90k = pcr - priv->first_pts;
-    else
-      timepassed_90k = (int)(pcr - priv->first_pts) + priv->wrapping_time * 0xFFFFFFFFLL;
+    if (priv->sync_mode != AV_SYNC_MODE_PCR_MASTER) {
+      gint64 timepassed2, diff;
 
-    timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
-    *cur = priv->first_pts_64 + timepassed;
+      /* for live streaming need to consider PTS wrapping */
+      if (priv->last_pcr != -1 && priv->last_pcr > 0xFFFF0000 && pcr < 10*PTS_90K) {
+        priv->wrapping_time++;
+        GST_INFO_OBJECT (sink, "pts wrapping num: %d", priv->wrapping_time);
+      }
+      if (pcr != -1)
+        priv->last_pcr = pcr;
 
-    if (priv->eos_time != -1) {
+      if (!priv->wrapping_time)
+        timepassed_90k = pcr - priv->first_pts;
+      else
+        timepassed_90k = (int)(pcr - priv->first_pts) + priv->wrapping_time * 0xFFFFFFFFLL;
+
+      timepassed = gst_util_uint64_scale_int (timepassed_90k, GST_SECOND, PTS_90K);
+      *cur = priv->first_pts_64 + timepassed;
+
+      if (priv->eos_time != -1) {
         timepassed2 = priv->eos_time - priv->first_pts_64;
         diff = (timepassed2 > timepassed)?
             (timepassed2 - timepassed):(timepassed - timepassed2);
@@ -857,10 +855,12 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
               timepassed, timepassed2);
           *cur = timepassed2;
         }
+      }
+    } else {
+      timepassed = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
+      *cur = timepassed;
     }
-  } else {
-    timepassed = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
-    *cur = timepassed;
+#endif
   }
 
   GST_LOG_OBJECT (sink, "POSITION: %lld pcr: %u wrapping: %d",

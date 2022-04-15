@@ -69,7 +69,7 @@ typedef GstClockTime (*GstAmlClockGetTimeFunc) (GstClock *clock, gpointer user_d
  */
 struct _GstAmlClock {
   GstSystemClock clock;
-
+  void * handle;
   /*< private >*/
   GstAmlClockPrivate *priv;
 };
