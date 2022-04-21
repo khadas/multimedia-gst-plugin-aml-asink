@@ -2566,6 +2566,9 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   while (priv->paused_ && !priv->flushing_)
     g_cond_wait (&priv->run_ready, &priv->feed_lock);
 
+  if (!priv->stream_)
+    goto commit_done;
+
   /* update render_samples after pause logic */
   priv->render_samples += samples;
 
