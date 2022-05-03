@@ -1887,6 +1887,7 @@ static int update_avsync_speed(GstAmlHalAsink *sink, float rate)
 
 static int create_av_sync(GstAmlHalAsink *sink)
 {
+  int ret = 0;
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
 #ifndef MEDIA_SYNC
@@ -1900,12 +1901,14 @@ static int create_av_sync(GstAmlHalAsink *sink)
       return 0;
 #endif
 
+    g_mutex_lock(&priv->feed_lock);
     if (priv->seamless_switch || priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
       priv->avsync = av_sync_attach (priv->session_id, AV_SYNC_TYPE_AUDIO);
     } else {
       priv->avsync = av_sync_create (priv->session_id, priv->sync_mode, AV_SYNC_TYPE_AUDIO, 0);
     }
     if (!priv->avsync) {
+      g_mutex_unlock(&priv->feed_lock);
       GST_ERROR_OBJECT (sink, "create av sync fail");
       return -1;
     }
@@ -1924,11 +1927,19 @@ static int create_av_sync(GstAmlHalAsink *sink)
       avs_sync_set_start_policy (priv->avsync, &policy);
     }
     /* set session into hwsync id */
-    g_mutex_lock(&priv->feed_lock);
     snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MSYNC);
     snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
-    priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
-    priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    if (priv->stream_) {
+      priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+      priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    } else {
+      if (priv->avsync) {
+        av_sync_destroy(priv->avsync);
+        priv->avsync = NULL;
+      }
+      GST_ERROR_OBJECT (sink, "no stream opened");
+      ret = -1;
+    }
     g_mutex_unlock(&priv->feed_lock);
   } else {
     GST_INFO_OBJECT (sink, "no need to create av sync, direct: %d",
@@ -1941,12 +1952,17 @@ static int create_av_sync(GstAmlHalAsink *sink)
     g_mutex_lock(&priv->feed_lock);
     snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MEDIASYNC);
     snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
-    priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
-    priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    if (priv->stream_) {
+      priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+      priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    } else {
+      GST_ERROR_OBJECT (sink, "no stream opened");
+      ret = -1;
+    }
     g_mutex_unlock(&priv->feed_lock);
   }
 #endif
-  return 0;
+  return ret;
 }
 
 static gboolean
@@ -2030,6 +2046,12 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
     case GST_EVENT_SEGMENT:
     {
       GstSegment segment;
+
+      if (GST_STATE(sink) <= GST_STATE_READY) {
+        GST_WARNING_OBJECT (sink, "segment event in wrong state %d", GST_STATE(sink));
+        break;
+      }
+
       gst_event_copy_segment (event, &segment);
       GST_DEBUG_OBJECT (sink, "configured segment %" GST_SEGMENT_FORMAT,
               &segment);
@@ -3436,7 +3458,6 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
   g_mutex_lock (&priv->feed_lock);
   priv->flushing_ = TRUE;
   g_cond_signal (&priv->run_ready);
-  g_mutex_unlock (&priv->feed_lock);
   GST_DEBUG_OBJECT (sink, "stop");
 
   if (priv->avsync) {
@@ -3448,6 +3469,7 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
     av_sync_destroy (priv->avsync);
     priv->avsync = NULL;
   }
+  g_mutex_unlock (&priv->feed_lock);
 
   return TRUE;
 }
