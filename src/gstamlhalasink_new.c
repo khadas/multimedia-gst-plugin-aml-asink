@@ -2598,6 +2598,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     GST_DEBUG_OBJECT (sink, "interrupted by stop");
     gst_buffer_unmap (buf, &info);
     g_mutex_unlock(&priv->feed_lock);
+    ret = GST_FLOW_FLUSHING;
     goto done;
   }
 
@@ -2973,14 +2974,13 @@ gst_aml_hal_asink_change_state (GstElement * element,
       break;
     }
     case GST_STATE_CHANGE_PAUSED_TO_READY:
-    {
-      GST_INFO_OBJECT(sink, "paused to ready");
-      paused_to_ready (sink);
-#ifdef ESSOS_RM
-      resMgrUpdateState(priv, EssRMgrRes_idle);
-#endif
+      // unblock _render and upstream
+      // original code here has to place below parent change_state (avoid race condtion)
+      g_mutex_lock(&priv->feed_lock);
+      priv->flushing_ = TRUE;
+      g_cond_signal(&priv->run_ready);
+      g_mutex_unlock(&priv->feed_lock);
       break;
-    }
     default:
       break;
   }
@@ -2990,6 +2990,15 @@ gst_aml_hal_asink_change_state (GstElement * element,
   switch (transition) {
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
       break;
+    case GST_STATE_CHANGE_PAUSED_TO_READY:
+    {
+      GST_INFO_OBJECT(sink, "paused to ready");
+      paused_to_ready (sink);
+#ifdef ESSOS_RM
+      resMgrUpdateState(priv, EssRMgrRes_idle);
+#endif
+      break;
+    }
     case GST_STATE_CHANGE_READY_TO_NULL:
       GST_INFO_OBJECT(sink, "ready to null");
       GST_OBJECT_LOCK (sink);
