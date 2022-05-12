@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) 2020 <song.zhao@amlogic.com>
+ * Copyright (C) 2020 Amlogic, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -135,6 +135,10 @@ gst_aml_clock_dispose (GObject * object)
  * @name: the name of the clock
  * @user_data: user data
  * @destroy_notify: #GDestroyNotify for @user_data
+ *
+ * Copyright (C) 1999,2000 Erik Walthinsen <omega@cse.ogi.edu>
+ * Copyright 2000 Wim Taymans <wtay@chello.be>
+ * Here licensed under the GNU Lesser General Public License, version 2.1
  *
  * Create a new #GstAmlClock instance. Whenever the clock time should be
  * calculated it will call @func with @user_data. When @func returns

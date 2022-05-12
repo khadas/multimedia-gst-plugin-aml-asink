@@ -1,5 +1,9 @@
 /* GStreamer
- * Copyright (C) 2020 <song.zhao@amlogic.com>
+ * Some extracts from GStreamer Plugins Base, which is:
+ * Copyright (C) 1999,2000 Erik Walthinsen <omega@cse.ogi.edu>
+ * Copyright 2005 Wim Taymans <wim@fluendo.com>
+ * Copyright 2020 Amlogic, Inc.
+ * Here licensed under the GNU Lesser General Public License, version 2.1
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

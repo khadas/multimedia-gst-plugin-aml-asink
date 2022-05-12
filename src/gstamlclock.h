@@ -1,5 +1,8 @@
 /* GStreamer
- * Copyright (C) 2020 <song.zhao@amlogic.com>
+ * Copyright (C) 1999,2000 Erik Walthinsen <omega@cse.ogi.edu>
+ * Copyright 2000 Wim Taymans <wtay@chello.be>
+ * Copyright 2020 Amlogic, Inc.
+ * Here licensed under the GNU Lesser General Public License, version 2.1
  *
  * gstamlclock.h: Clock for use by amlogic pipeline
  *
