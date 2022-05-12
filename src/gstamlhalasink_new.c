@@ -2494,10 +2494,16 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   time = GST_BUFFER_TIMESTAMP (buf);
 
+  if ((!GST_CLOCK_TIME_IS_VALID (time) && !priv->first_pts_set) && priv->direct_mode_) {
+    GST_INFO_OBJECT (sink, "discard frame wo/ pts at beginning");
+    goto done;
+  }
   if ((!GST_CLOCK_TIME_IS_VALID (time) ||
       (priv->last_ts != GST_CLOCK_TIME_NONE && priv->last_ts == time)) &&
       is_raw_type(priv->spec.type)) {
-    time = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, rate);
+    time = priv->first_pts_64;
+    time += gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, rate);
+    GST_BUFFER_TIMESTAMP (buf) = time;
     GST_LOG_OBJECT (sink, "fake time %" GST_TIME_FORMAT, GST_TIME_ARGS (time));
   }
 
