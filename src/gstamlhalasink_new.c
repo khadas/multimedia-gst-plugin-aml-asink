@@ -1751,6 +1751,11 @@ static GstClockReturn sink_wait_clock (GstAmlHalAsink * sink,
   }
 
   do {
+    if (priv->flushing_) {
+      GST_INFO_OBJECT (sink, "we are flusing, do not wait");
+      ret = GST_CLOCK_OK;
+      break;
+    }
     now = gst_aml_hal_asink_get_time (clock, sink);
     if (now == GST_CLOCK_TIME_NONE) {
       ret = GST_CLOCK_UNSCHEDULED;
