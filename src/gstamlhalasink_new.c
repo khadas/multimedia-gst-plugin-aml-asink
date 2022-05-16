@@ -1543,9 +1543,9 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     spec->type = GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2;
     info.bpf = 1;
   }   else if (g_str_equal (mimetype, "audio/x-private-ts-lpcm")) {
-    if (!(gst_structure_get_int (structure, "rate", &info.rate)))
+    if (!(gst_structure_get_int (structure, "rate", &info.rate)) || info.rate <= 0)
         info.rate = 48000;
-    if (!gst_structure_get_int (structure, "channels", &info.channels))
+    if (!gst_structure_get_int (structure, "channels", &info.channels) || info.channels <= 0)
         info.channels = 2;
     spec->type = GST_AUDIO_FORMAT_TYPE_LPCM_TS;
     info.bpf = 1;
