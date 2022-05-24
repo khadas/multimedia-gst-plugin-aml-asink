@@ -806,9 +806,11 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
 
 #ifdef MEDIA_SYNC
     GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
-
     if (aclock->handle) {
-      MediaSync_getMediaTime(aclock->handle, -1, cur, false);
+      MediaSync_GetMediaTimeByType(aclock->handle, MEDIA_STC_TIME, MEDIASYNC_UNIT_US, cur);
+      if (*cur < 0) {
+        *cur = 0;
+      }
       *cur = gst_util_uint64_scale_int(*cur, GST_SECOND, GST_MSECOND);
     }
 #else
