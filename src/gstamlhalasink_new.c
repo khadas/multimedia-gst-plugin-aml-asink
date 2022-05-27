@@ -1613,7 +1613,6 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink,
 
   /* release old ringbuffer */
   GST_OBJECT_LOCK (sink);
-  hal_pause (sink);
   hal_release (sink);
   priv->flushing_ = FALSE;
   GST_OBJECT_UNLOCK (sink);
