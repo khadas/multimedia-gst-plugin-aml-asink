@@ -1885,8 +1885,15 @@ static int update_avsync_speed(GstAmlHalAsink *sink, float rate)
   if (rate == priv->rate)
     return 0;
 
+#ifdef MEDIA_SYNC
+  GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
+  if (aclock->handle) {
+    rc = MediaSync_setPlaybackRate(aclock->handle, rate);
+  }
+#else
   if (priv->avsync)
     rc = av_sync_set_speed(priv->avsync, rate);
+#endif
 
   if (!rc)
     priv->rate = rate;
@@ -2069,10 +2076,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       if (segment.start != GST_CLOCK_TIME_NONE) {
         GstMessage *seg_rec;
 
-        if (priv->segment.rate != 0.0 && priv->segment.rate != segment.rate) {
-          GST_INFO_OBJECT (sink, "ignore rate %f keep %f", segment.rate, priv->segment.rate);
-          segment.rate = priv->segment.rate;
-        }
         priv->segment = segment;
         priv->render_samples = 0;
         seg_rec = gst_message_new_info_with_details (GST_OBJECT_CAST (sink),
