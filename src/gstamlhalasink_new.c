@@ -2838,11 +2838,11 @@ static void resMgrNotify(EssRMgr *rm, int event, int type, int id, void* userDat
           GST_DEBUG_OBJECT (sink, "done releasing audio decoder %d", id);
           break;
         }
+        case EssRMgrEvent_granted:
         default:
         break;
       }
     }
-    case EssRMgrEvent_granted:
     default:
       break;
   }
