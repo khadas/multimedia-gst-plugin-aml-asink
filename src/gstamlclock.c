@@ -18,13 +18,13 @@
  */
 
 #include <gst/gstclock.h>
+#include <stdlib.h>
+#include <stdio.h>
+
 #include "gstamlclock.h"
 #include "aml_avsync.h"
+#include "mediasync_wrap.h"
 
-#ifdef MEDIA_SYNC
-#include <stdio.h>
-#include "MediaSyncInterface.h"
-#endif
 
 GST_DEBUG_CATEGORY_STATIC (gst_aml_clock_debug);
 #define GST_CAT_DEFAULT gst_aml_clock_debug
@@ -37,6 +37,7 @@ struct _GstAmlClockPrivate
   gpointer                 user_data;
   GDestroyNotify           destroy_notify;
 
+  enum gst_aml_clock_type type;
   int session;
   int session_id;
 };
@@ -82,24 +83,40 @@ gst_aml_clock_init (GstAmlClock * clock)
 #else
   GstAmlClockPrivate *priv = GST_AML_CLOCK_GET_PRIVATE (clock);
 #endif
+  const char *env = getenv("AML_AV_SYNC_TYPE");
   clock->priv = priv;
   priv->session_id = -1;
 
-#ifdef MEDIA_SYNC
-  clock->handle = MediaSync_create();
-  priv->session = MediaSync_allocInstance(clock->handle, 0, 0, &priv->session_id);
-  FILE * fp;
-  fp = fopen("/data/MediaSyncId", "w");
-  if (fp == NULL) {
-    GST_ERROR("could not open file:/data/MediaSyncId failed");
-  } else {
-    fwrite(&priv->session_id, sizeof(int), 1, fp);
-    fclose(fp);
+  if (env) {
+    priv->type = atoi(env);
+    GST_WARNING("clock type %d, env %s", priv->type, env);
   }
-#else
-  clock->handle = NULL;
-  priv->session = av_sync_open_session(&priv->session_id);
-#endif
+
+  if (priv->type != GST_AML_CLOCK_TYPE_MSYNC && priv->type != GST_AML_CLOCK_TYPE_MEDIASYNC) {
+    priv->type = GST_AML_CLOCK_TYPE_MSYNC;
+  }
+
+  GST_WARNING("clock type %d", priv->type);
+
+  if (priv->type == GST_AML_CLOCK_TYPE_MEDIASYNC) {
+    clock->handle = mediasync_wrap_create();
+    if (!clock->handle) {
+      GST_ERROR("could not create mediasync handle");
+      return;
+    }
+    priv->session = mediasync_wrap_allocInstance(clock->handle, 0, 0, &priv->session_id);
+    FILE * fp;
+    fp = fopen("/data/MediaSyncId", "w");
+    if (fp == NULL) {
+      GST_ERROR("could not open file:/data/MediaSyncId failed");
+    } else {
+      fwrite(&priv->session_id, sizeof(int), 1, fp);
+      fclose(fp);
+    }
+  } else {
+    clock->handle = NULL;
+    priv->session = av_sync_open_session(&priv->session_id);
+  }
 
   if (priv->session < 0) {
     GST_ERROR("can not create session");
@@ -118,14 +135,11 @@ gst_aml_clock_dispose (GObject * object)
   priv->destroy_notify = NULL;
   priv->user_data = NULL;
 
-#ifdef MEDIA_SYNC
-  if (clock->handle) {
-    MediaSync_destroy(clock->handle);
+  if (clock->handle && priv->type == GST_AML_CLOCK_TYPE_MEDIASYNC) {
+    mediasync_wrap_destroy(clock->handle);
+  } else if (priv->session >= 0) {
+      av_sync_close_session(priv->session);
   }
-#else
-  if (priv->session >= 0)
-    av_sync_close_session(priv->session);
-#endif
 
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }
@@ -194,4 +208,12 @@ gst_aml_clock_get_internal_time (GstClock * clock)
 GstClockTime gst_aml_clock_get_time (GstClock * clock)
 {
   return gst_aml_clock_get_internal_time (clock);
+}
+
+enum gst_aml_clock_type gst_aml_clock_get_clock_type (GstClock * clock)
+{
+    GstAmlClock *aclock = GST_AML_CLOCK_CAST (clock);
+    GstAmlClockPrivate *priv = aclock->priv;
+
+    return priv->type;
 }

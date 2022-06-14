@@ -9,7 +9,7 @@ echo $BASE
 MAJORVERSION=1
 
 #minor version
-MINORVERSION=0
+MINORVERSION=1
 
 #reversion,now use commit count
 REVISION=1

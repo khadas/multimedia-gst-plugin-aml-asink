@@ -19,7 +19,8 @@ libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c \
 			       ac4_frame_parse.c \
 			       scaletempo.h \
 			       scaletempo.c \
-			       gstamlclock.c
+			       gstamlclock.c \
+			       mediasync_wrap.c
 
 # compiler and linker flags used to compile this plugin, set in configure.ac
 libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS)
@@ -46,11 +47,6 @@ if DTS
 libgstamlhalasink_la_CFLAGS += -DENABLE_DTS
 endif
 
-if MEDIA_SYNC
-libgstamlhalasink_la_CFLAGS += -DMEDIA_SYNC
-libgstamlhalasink_la_LIBADD += -lmediahal_mediasync
-endif
-
 if ESSOS
 libgstamlhalasink_la_CFLAGS += -DESSOS_RM
 libgstamlhalasink_la_LIBADD += -lessosrmgr
@@ -58,7 +54,7 @@ endif
 
 # headers we need but don't want installed
 #noinst_HEADERS =
-include_HEADERS = gstamlclock.h gstamlhalasink_new.h
+include_HEADERS = gstamlclock.h gstamlhalasink_new.h mediasync_wrap.h
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = amlhalasink.pc

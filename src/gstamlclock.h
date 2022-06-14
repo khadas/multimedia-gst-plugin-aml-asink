@@ -65,6 +65,14 @@ typedef struct _GstAmlClockPrivate GstAmlClockPrivate;
  */
 typedef GstClockTime (*GstAmlClockGetTimeFunc) (GstClock *clock, gpointer user_data);
 
+enum gst_aml_clock_type
+{
+  GST_AML_CLOCK_TYPE_NULL = 0,
+  GST_AML_CLOCK_TYPE_TSYNC = 1,
+  GST_AML_CLOCK_TYPE_MSYNC = 2,
+  GST_AML_CLOCK_TYPE_MEDIASYNC = 3,
+};
+
 /**
  * GstAmlClock:
  *
@@ -86,6 +94,7 @@ GstClock*       gst_aml_clock_new             (const gchar *name, GstAmlClockGet
                                                  gpointer user_data, GDestroyNotify destroy_notify);
 GstClockTime    gst_aml_clock_get_time        (GstClock * clock);
 int             gst_aml_clock_get_session_id  (GstClock * clock);
+enum gst_aml_clock_type gst_aml_clock_get_clock_type (GstClock * clock);
 
 #ifdef G_DEFINE_AUTOPTR_CLEANUP_FUNC
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstAmlClock, gst_object_unref)

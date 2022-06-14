@@ -46,10 +46,7 @@
 #include "aml_avsync.h"
 #include "aml_avsync_log.h"
 #include "aml_version.h"
-
-#ifdef MEDIA_SYNC
-#include "MediaSyncInterface.h"
-#endif
+#include "mediasync_wrap.h"
 
 #ifdef ESSOS_RM
 #include "essos-resmgr.h"
@@ -272,14 +269,6 @@ enum
   SIGNAL_XRUN,
   SIGNAL_AUDSWITCH,
   MAX_SIGNAL
-};
-
-enum
-{
-  AV_SYNC_TYPE_NULL = 0,
-  AV_SYNC_TYPE_TSYNC = 1,
-  AV_SYNC_TYPE_MSYNC = 2,
-  AV_SYNC_TYPE_MEDIASYNC = 3,
 };
 
 #define COMMON_AUDIO_CAPS \
@@ -802,18 +791,16 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
   if (!priv->provided_clock) {
     //TODO(song): get HAL position
     *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
-  } else {
-
-#ifdef MEDIA_SYNC
+  } else if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC) {
     GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
     if (aclock->handle) {
-      MediaSync_GetMediaTimeByType(aclock->handle, MEDIA_STC_TIME, MEDIASYNC_UNIT_US, cur);
+      mediasync_wrap_GetMediaTimeByType(aclock->handle, MEDIA_STC_TIME, MEDIASYNC_UNIT_US, cur);
       if (*cur < 0) {
         *cur = 0;
       }
       *cur = gst_util_uint64_scale_int(*cur, GST_SECOND, GST_MSECOND);
     }
-#else
+  } else {
     rc = avsync_get_time(sink, &pcr);
     if (rc)
         return FALSE;
@@ -866,7 +853,6 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
       timepassed = gst_util_uint64_scale_int (pcr, GST_SECOND, PTS_90K);
       *cur = timepassed;
     }
-#endif
   }
 
   GST_LOG_OBJECT (sink, "POSITION: %lld pcr: %u wrapping: %d",
@@ -1885,15 +1871,11 @@ static int update_avsync_speed(GstAmlHalAsink *sink, float rate)
   if (rate == priv->rate)
     return 0;
 
-#ifdef MEDIA_SYNC
   GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
-  if (aclock->handle) {
-    rc = MediaSync_setPlaybackRate(aclock->handle, rate);
-  }
-#else
-  if (priv->avsync)
+  if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC) {
+    rc = mediasync_wrap_setPlaybackRate(aclock->handle, rate);
+  } else if (priv->avsync)
     rc = av_sync_set_speed(priv->avsync, rate);
-#endif
 
   if (!rc)
     priv->rate = rate;
@@ -1907,8 +1889,21 @@ static int create_av_sync(GstAmlHalAsink *sink)
   int ret = 0;
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
-#ifndef MEDIA_SYNC
-  if (!priv->avsync && priv->direct_mode_) {
+  if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC && priv->direct_mode_) {
+    char id_setting[20] = {0};
+    char type_setting[20] = {0};
+    g_mutex_lock(&priv->feed_lock);
+    snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", GST_AML_CLOCK_TYPE_MEDIASYNC);
+    snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
+    if (priv->stream_) {
+      priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
+      priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
+    } else {
+      GST_ERROR_OBJECT (sink, "no stream opened");
+      ret = -1;
+    }
+    g_mutex_unlock(&priv->feed_lock);
+  } else if (!priv->avsync && priv->direct_mode_) {
     char id_setting[20] = {0};
     char type_setting[20] = {0};
     struct start_policy policy;
@@ -1944,7 +1939,7 @@ static int create_av_sync(GstAmlHalAsink *sink)
       avs_sync_set_start_policy (priv->avsync, &policy);
     }
     /* set session into hwsync id */
-    snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MSYNC);
+    snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", GST_AML_CLOCK_TYPE_MSYNC);
     snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
     if (priv->stream_) {
       priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
@@ -1962,23 +1957,7 @@ static int create_av_sync(GstAmlHalAsink *sink)
     GST_INFO_OBJECT (sink, "no need to create av sync, direct: %d",
         priv->direct_mode_);
   }
-#else
-  if (priv->direct_mode_) {
-    char id_setting[20] = {0};
-    char type_setting[20] = {0};
-    g_mutex_lock(&priv->feed_lock);
-    snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", AV_SYNC_TYPE_MEDIASYNC);
-    snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
-    if (priv->stream_) {
-      priv->stream_->common.set_parameters (&priv->stream_->common, type_setting);
-      priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
-    } else {
-      GST_ERROR_OBJECT (sink, "no stream opened");
-      ret = -1;
-    }
-    g_mutex_unlock(&priv->feed_lock);
-  }
-#endif
+
   return ret;
 }
 
