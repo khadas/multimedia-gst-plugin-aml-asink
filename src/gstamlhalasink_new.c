@@ -2426,7 +2426,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   }
 
   if (G_UNLIKELY (!priv->stream_))
-    goto wrong_state;
+    goto lost_resource;
 
   if (G_UNLIKELY (priv->received_eos))
     goto was_eos;
@@ -2732,11 +2732,10 @@ out_of_segment:
     ret = GST_FLOW_OK;
     goto done;
   }
-wrong_state:
+lost_resource:
   {
-    GST_DEBUG_OBJECT (sink, "not negotiated");
-    GST_ELEMENT_ERROR (sink, STREAM, FORMAT, (NULL), ("sink not negotiated."));
-    ret = GST_FLOW_NOT_NEGOTIATED;
+    GST_DEBUG_OBJECT (sink, "lost resource");
+    ret = GST_FLOW_OK;
     goto done;
   }
 wrong_size:
