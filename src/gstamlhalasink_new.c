@@ -1889,7 +1889,7 @@ static int create_av_sync(GstAmlHalAsink *sink)
   int ret = 0;
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
-  if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC && priv->direct_mode_) {
+  if (priv->direct_mode_ && gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC) {
     char id_setting[20] = {0};
     char type_setting[20] = {0};
     g_mutex_lock(&priv->feed_lock);
