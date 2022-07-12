@@ -2584,7 +2584,11 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   g_mutex_lock(&priv->feed_lock);
   /* blocked on paused */
   while (priv->paused_ && !priv->flushing_)
-    g_cond_wait (&priv->run_ready, &priv->feed_lock);
+  {
+      GST_PAD_STREAM_UNLOCK(GST_BASE_SINK_PAD(sink));
+      g_cond_wait (&priv->run_ready, &priv->feed_lock);
+      GST_PAD_STREAM_LOCK(GST_BASE_SINK_PAD(sink));
+  }
 
   if (!priv->stream_)
     goto commit_done;
