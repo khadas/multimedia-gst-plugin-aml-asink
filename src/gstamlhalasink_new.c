@@ -2007,6 +2007,9 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       priv->received_eos = FALSE;
       priv->flushing_ = TRUE;
       priv->quit_clock_wait = TRUE;
+      /* unblock audio HAL wait */
+      if (priv->avsync)
+        avs_sync_stop_audio (priv->avsync);
       /* unblock hal_commit() */
       g_mutex_lock(&priv->feed_lock);
       g_cond_signal (&priv->run_ready);
@@ -3464,6 +3467,10 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
     GST_ERROR_OBJECT (sink, "pause failure:%d", ret);
     return FALSE;
   }
+
+  /* unblock audio HAL wait */
+  if (priv->avsync)
+    avs_sync_stop_audio (priv->avsync);
 
   g_mutex_lock (&priv->feed_lock);
   priv->flushing_ = TRUE;
