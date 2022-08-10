@@ -3897,9 +3897,9 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
       if (priv->diag_log_enable && pts_32 != -1)
         diag_print (sink, pts_32);
     } else if (raw_data) {
-      /* audio hal can not handle too big frame, limit to 4K*/
-      if (cur_size > 4*1024) {
-        cur_size = 4*1024;
+      /* audio hal can not handle too big frame, limit to 8K*/
+      if (cur_size > 8*1024) {
+        cur_size = 8*1024;
       }
     }
 
@@ -3914,6 +3914,10 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
     } else {
       /* should consume all the PCM data */
       written = priv->stream_->write(priv->stream_, data, cur_size);
+      if (written < 0) {
+        GST_ERROR_OBJECT (sink, "drop data %d/%d", written, cur_size);
+        return cur_size;
+      }
     }
 
     towrite -= written;
