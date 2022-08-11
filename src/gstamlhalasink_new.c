@@ -197,6 +197,7 @@ struct _GstAmlHalAsinkPrivate
   gboolean seamless_switch;
   gboolean tempo_disable; /* disable tempo use */
 
+  gboolean ms12_enable;
 #ifdef ENABLE_MS12
   /* ac4 config */
   int ac4_pres_group_idx;
@@ -663,6 +664,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->sync_mode = AV_SYNC_MODE_AMASTER;
   priv->session_id = -1;
   priv->stream_volume = 1.0;
+  priv->ms12_enable = false;
 #ifdef ENABLE_MS12
   priv->ac4_pat = 255;
   priv->ac4_ass_type = 255;
@@ -2331,41 +2333,41 @@ static gpointer xrun_thread(gpointer para)
     }
     if (!priv->xrun_paused &&
            g_timer_elapsed(priv->xrun_timer, NULL) > 0.4) {
-#ifdef ENABLE_MS12
-      char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
-              "main_input_underrun");
-      int underrun = 0;
+      if (priv->ms12_enable) {
+        char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
+            "main_input_underrun");
+        int underrun = 0;
 
-      if (status) {
-        sscanf(status,"main_input_underrun=%d", &underrun);
-        free (status);
-      }
-
-      if (!underrun) {
-        usleep(10000);
-        continue;
-      }
-      if (priv->received_eos) {
-        GST_INFO_OBJECT (sink, "xrun timer reached EOS");
-        GST_OBJECT_LOCK (sink);
-        priv->eos = TRUE;
-        GST_OBJECT_UNLOCK (sink);
-      } else {
-        if (!priv->disable_xrun) {
-          hal_pause (sink);
-          GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+        if (status) {
+          sscanf(status,"main_input_underrun=%d", &underrun);
+          free (status);
         }
+
+        if (!underrun) {
+          usleep(10000);
+          continue;
+        }
+        if (priv->received_eos) {
+          GST_INFO_OBJECT (sink, "xrun timer reached EOS");
+          GST_OBJECT_LOCK (sink);
+          priv->eos = TRUE;
+          GST_OBJECT_UNLOCK (sink);
+        } else {
+          if (!priv->disable_xrun) {
+            hal_pause (sink);
+            GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+          }
+          g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+          GST_WARNING_OBJECT (sink, "xrun signaled");
+        }
+        g_timer_start(priv->xrun_timer);
+        g_timer_stop(priv->xrun_timer);
+      } else {
+        GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
+        hal_pause (sink);
+        priv->xrun_paused = true;
         g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
-        GST_WARNING_OBJECT (sink, "xrun signaled");
       }
-      g_timer_start(priv->xrun_timer);
-      g_timer_stop(priv->xrun_timer);
-#else
-      GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-      hal_pause (sink);
-      priv->xrun_paused = true;
-      g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
-#endif
     }
     usleep(50000);
   }
@@ -3053,7 +3055,8 @@ open_failed:
 /* open the device with given specs */
 static gboolean gst_aml_hal_asink_open (GstAmlHalAsink* sink)
 {
-  int ret;
+  int ret, val = 0;
+  char *status;
   GstAmlHalAsinkPrivate *priv = sink->priv;
 
   GST_DEBUG_OBJECT (sink, "open");
@@ -3062,7 +3065,17 @@ static gboolean gst_aml_hal_asink_open (GstAmlHalAsink* sink)
     GST_ERROR_OBJECT(sink, "fail to load hw:%d", ret);
     return FALSE;
   }
-  GST_DEBUG_OBJECT (sink, "load hw done");
+
+  status = priv->hw_dev_->get_parameters (priv->hw_dev_,
+      "dolby_ms12_enable");
+
+  if (status) {
+    sscanf(status,"dolby_ms12_enable=%d", &val);
+    priv->ms12_enable = val;
+    free (status);
+    GST_DEBUG_OBJECT (sink, "load hw done ms12: %d", val);
+  }
+
   return TRUE;
 }
 
