@@ -57,6 +57,8 @@
 #include "pes_private_data.h"
 #endif
 
+#define G_ATOMIC_LOCK_FREE
+
 GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_CAT_DEFAULT gst_aml_hal_asink_debug_category
 
@@ -755,12 +757,11 @@ static int avsync_get_time(GstAmlHalAsink* sink, pts90K *pts)
     int rc = 0;
     GstAmlHalAsinkPrivate *priv = sink->priv;
 
-    if (!priv->avsync) {
-        rc = -1;
-        goto exit;
+    if (!g_atomic_pointer_compare_and_exchange (&priv->avsync, NULL, NULL)) {
+      rc = av_sync_get_clock(priv->avsync, pts);
+    } else {
+      rc = -1;
     }
-
-    rc = av_sync_get_clock(priv->avsync, pts);
 
 exit:
     return rc;
@@ -1948,8 +1949,9 @@ static int create_av_sync(GstAmlHalAsink *sink)
       priv->stream_->common.set_parameters (&priv->stream_->common, id_setting);
     } else {
       if (priv->avsync) {
-        av_sync_destroy(priv->avsync);
-        priv->avsync = NULL;
+        void *tmp = priv->avsync;
+        g_atomic_pointer_set (&priv->avsync, NULL);
+        av_sync_destroy(tmp);
       }
       GST_ERROR_OBJECT (sink, "no stream opened");
       ret = -1;
@@ -3491,13 +3493,15 @@ static gboolean hal_stop (GstAmlHalAsink * sink)
   GST_DEBUG_OBJECT (sink, "stop");
 
   if (priv->avsync) {
+    void *tmp;
     /* if session is still alive, recover mode for next playback */
     if (priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
       GST_INFO_OBJECT(sink, "recover avsync mode");
       av_sync_change_mode (priv->avsync, AV_SYNC_MODE_PCR_MASTER);
     }
-    av_sync_destroy (priv->avsync);
-    priv->avsync = NULL;
+    tmp = priv->avsync;
+    g_atomic_pointer_set (&priv->avsync, NULL);
+    av_sync_destroy (tmp);
   }
   g_mutex_unlock (&priv->feed_lock);
 
