@@ -1,0 +1,12 @@
+Major_V=1
+Minor_V=3
+BaseChangeId=I1d0de9122af433d2c99013c392fedfce3d781871
+
+#history version
+#V1.2.209 Release Notes
+#Release_ChangeId_V1_2=I5cc03af8180b399a73245359ae5c9f56cb16d540
+#use mediasync depends environment setting
+#asink pad stream lock deadlock
+#fix crash for non-direct-mode
+#don't return FLOW error when resource is revoked
+
