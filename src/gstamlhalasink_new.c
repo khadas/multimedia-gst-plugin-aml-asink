@@ -3425,8 +3425,10 @@ static gboolean hal_start (GstAmlHalAsink * sink)
 
       GST_DEBUG_OBJECT (sink, "resume");
 
-      if (priv->xrun_timer)
+      /* if need to wait for video, start the timer after first hal_commit */
+      if (!priv->wait_video && priv->xrun_timer)
         g_timer_start(priv->xrun_timer);
+
       priv->paused_ = FALSE;
       g_cond_signal (&priv->run_ready);
     }
