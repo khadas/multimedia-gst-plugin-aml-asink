@@ -2367,6 +2367,11 @@ static gpointer xrun_thread(gpointer para)
         g_timer_start(priv->xrun_timer);
         g_timer_stop(priv->xrun_timer);
       } else {
+        if (priv->paused_) {
+          usleep(50000);
+          g_timer_start(priv->xrun_timer);
+          continue;
+        }
         GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
         hal_pause (sink);
         priv->xrun_paused = true;
