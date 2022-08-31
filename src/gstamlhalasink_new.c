@@ -3840,8 +3840,10 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
 
       //truncate to 32bit PTS
       if (pts_64 != GST_CLOCK_TIME_NONE && pts_64 != HAL_INVALID_PTS) {
-        pts_32 = gst_util_uint64_scale_int (pts_64, PTS_90K, GST_SECOND);
-        pts_64 = gst_util_uint64_scale_int(pts_32, GST_SECOND, PTS_90K);
+        if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MSYNC) {
+          pts_32 = gst_util_uint64_scale_int(pts_64, PTS_90K, GST_SECOND);
+          pts_64 = gst_util_uint64_scale_int(pts_32, GST_SECOND, PTS_90K);
+        }
       } else {
         pts_64 = HAL_INVALID_PTS;
       }
