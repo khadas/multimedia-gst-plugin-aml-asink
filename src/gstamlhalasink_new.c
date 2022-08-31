@@ -1082,8 +1082,8 @@ gst_aml_hal_sink_set_stream_mute (GstAmlHalAsink * sink, gboolean mute)
 
 static void remove_clock (GObject * object)
 {
-  GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
-  GstElementClass *eclass = (GstElementClass *)class;
+  GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_GET_CLASS(object);
+  GstElementClass *eclass = GST_ELEMENT_CLASS(class);
   GstAmlHalAsink *sink = GST_AML_HAL_ASINK (object);
   GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
   GstAmlHalAsinkPrivate *priv = sink->priv;
@@ -1121,9 +1121,9 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
         priv->tempo_used = FALSE;
       }
       if (!priv->direct_mode_ && priv->provided_clock) {
-        GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_CLASS(object);
+        GstAmlHalAsinkClass *class = GST_AML_HAL_ASINK_GET_CLASS(object);
         GstBaseSink *basesink = GST_BASE_SINK_CAST (sink);
-        GstElementClass *eclass = (GstElementClass *)class;
+        GstElementClass *eclass = GST_ELEMENT_CLASS(class);
 
         gst_object_unref (priv->provided_clock);
         priv->provided_clock = NULL;
