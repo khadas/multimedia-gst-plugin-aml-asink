@@ -1143,8 +1143,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     }
     case PROP_TTS_MODE:
       priv->tts_mode_ = g_value_get_boolean(value);
-      if (priv->tts_mode_)
+      if (priv->tts_mode_) {
         priv->direct_mode_ = false;
+        remove_clock (object);
+      }
       GST_WARNING_OBJECT (sink, "set tts mode:%d", priv->tts_mode_);
       break;
     case PROP_OUTPUT_PORT:
