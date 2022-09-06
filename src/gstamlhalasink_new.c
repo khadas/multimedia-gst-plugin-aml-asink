@@ -2576,6 +2576,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       /* lenth 0 can not be commited */
       GST_OBJECT_UNLOCK (sink);
       GST_LOG_OBJECT (sink, "skip length 0 buff");
+      priv->render_samples += samples;
       goto done;
     }
     /* note: do not update time to output buffer
