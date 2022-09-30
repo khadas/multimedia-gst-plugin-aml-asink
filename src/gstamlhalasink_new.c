@@ -296,7 +296,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       COMMON_AUDIO_CAPS "; "
       "audio/x-ac4; "
 #ifdef ENABLE_MS12
-      "audio/mpeg, mpegversion=4, stream-format=(string){loas}; "
+      "audio/mpeg, mpegversion=(int)4, profile=(string)lc; "
 #endif
 #ifdef ENABLE_DTS
       "audio/x-dts; "
@@ -846,7 +846,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
         timepassed2 = priv->eos_time - priv->first_pts_64;
         diff = (timepassed2 > timepassed)?
             (timepassed2 - timepassed):(timepassed - timepassed2);
-        if (diff  > GST_SECOND * 10) {
+        if (diff  > GST_SECOND * 20) {
           GST_INFO_OBJECT (sink, "pts jump detected: %lld --> %lld",
               timepassed, timepassed2);
           *cur = timepassed2;
