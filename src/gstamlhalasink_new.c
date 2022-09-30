@@ -700,7 +700,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->rm = 0;
   priv->resAssignedId = -1;
 #endif
-  log_set_level(LOG_INFO);
+  log_set_level(AVS_LOG_INFO);
 }
 
 static void
