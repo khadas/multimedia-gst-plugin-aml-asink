@@ -77,15 +77,6 @@ else
 fi
 AC_SUBST(plugindir)
 
-AC_ARG_ENABLE([xrun-detection],
-[  --enable-xrun-detection Turn on underrun detection],
-[case "${enableval}" in
-  yes) xrun=true ;;
-  no)  xrun=false ;;
-  *) AC_MSG_ERROR([bad value ${enableval} for --enable-xrun-detection]) ;;
-esac],[xrun-detection=false])
-AM_CONDITIONAL([XRUN], [test x$xrun = xtrue])
-
 AC_ARG_ENABLE([ms12],
 [  --enable-ms12 audio HAL is using ms12],
 [case "${enableval}" in

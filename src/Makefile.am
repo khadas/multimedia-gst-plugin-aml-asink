@@ -35,10 +35,6 @@ libgstamlhalasink_la_LDFLAGS += -lgstpesmeta
 libgstamlhalasink_la_CFLAGS += -DSUPPORT_AD
 endif
 
-if XRUN
-libgstamlhalasink_la_CFLAGS += -DENABLE_XRUN_DETECTION
-endif
-
 if MS12
 libgstamlhalasink_la_CFLAGS += -DENABLE_MS12
 endif

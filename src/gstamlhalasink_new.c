@@ -495,7 +495,7 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
         0, G_MAXINT, 0, G_PARAM_WRITABLE));
 
   g_object_class_install_property (gobject_class, PROP_DISABLE_XRUN_TIMER,
-      g_param_spec_boolean ("disable-xrun", "Disable underrun timer",
+      g_param_spec_boolean ("disable-xrun", "Disable underrun timer auto pause",
           "If the audio stream is not stable like in Mircast case, set it to prevent unexpected pause",
           FALSE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
 
@@ -809,7 +809,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
         return FALSE;
 
     if (pcr == -1) {
-      if (priv->paused_ && priv->last_pcr != -1) {
+      if ((priv->paused_ || priv->xrun_paused) && priv->last_pcr != -1) {
         pcr = priv->last_pcr;
         GST_LOG_OBJECT (sink, "paused, return last %u", pcr);
       } else {
@@ -1220,14 +1220,17 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       GST_WARNING_OBJECT (sink, "wait video:%d", priv->wait_video);
       break;
     case PROP_SEAMLESS_SWITCH:
-      priv->seamless_switch = g_value_get_boolean(value);
+    {
+      gboolean enable = g_value_get_boolean(value);
       GST_WARNING_OBJECT (sink, "seamless switch audio:%d", priv->seamless_switch);
       if (priv->avsync) {
            GST_INFO_OBJECT (sink, "AV sync set seamless switch:%d",
                    priv->seamless_switch);
-           av_sync_set_audio_switch(priv->avsync, priv->seamless_switch);
+           av_sync_set_audio_switch(priv->avsync, enable);
       }
+      priv->seamless_switch = enable;
       break;
+    }
     case PROP_DISABLE_TEMPO_STRETCH:
       priv->tempo_disable = g_value_get_boolean(value);
       GST_WARNING_OBJECT (sink, "disable tempo stretch:%d", priv->tempo_disable);
@@ -2316,7 +2319,6 @@ after_eos:
   }
 }
 
-#ifdef ENABLE_XRUN_DETECTION
 static gpointer xrun_thread(gpointer para)
 {
   GstAmlHalAsink *sink = (GstAmlHalAsink *)para;
@@ -2326,17 +2328,29 @@ static gpointer xrun_thread(gpointer para)
   while (!priv->quit_xrun_thread) {
     /* cobalt cert requires pause avsync to stop video rendering */
     if (priv->seamless_switch) {
-        bool result;
+        bool result = false;
         av_sync_get_audio_switch(priv->avsync,  &result);
         if (!result) {
            GST_INFO_OBJECT (sink, "audio seamless switch finish");
            priv->seamless_switch = false;
            // emit the event here if needed
            g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_AUDSWITCH], 0, 0, NULL);
+           g_timer_start(priv->xrun_timer);
+        } else {
+           usleep(10000);
         }
+        continue;
     }
     if (!priv->xrun_paused &&
            g_timer_elapsed(priv->xrun_timer, NULL) > 0.4) {
+      /* disable auto pause feature */
+      if (priv->disable_xrun) {
+        GST_INFO_OBJECT (sink, "xrun timer fired 0.7s no data coming");
+        g_timer_start(priv->xrun_timer);
+        g_timer_stop(priv->xrun_timer);
+        continue;
+      }
+
       if (priv->ms12_enable) {
         char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
             "main_input_underrun");
@@ -2358,6 +2372,7 @@ static gpointer xrun_thread(gpointer para)
           GST_OBJECT_UNLOCK (sink);
         } else {
           if (!priv->disable_xrun) {
+            priv->xrun_paused = true;
             hal_pause (sink);
             GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
           }
@@ -2374,8 +2389,8 @@ static gpointer xrun_thread(gpointer para)
           continue;
         }
         GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-        hal_pause (sink);
         priv->xrun_paused = true;
+        hal_pause (sink);
         g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
       }
     }
@@ -2405,7 +2420,6 @@ static int start_xrun_thread (GstAmlHalAsink * sink)
   }
   return 0;
 }
-#endif
 
 static void stop_xrun_thread (GstAmlHalAsink * sink)
 {
@@ -2719,7 +2733,6 @@ commit_done:
   g_mutex_unlock(&priv->feed_lock);
   gst_buffer_unmap (buf, &info);
 
-#ifdef ENABLE_XRUN_DETECTION
   GST_OBJECT_LOCK (sink);
   if (priv->sync_mode == AV_SYNC_MODE_AMASTER &&
         priv->stream_ && !priv->xrun_thread &&
@@ -2729,7 +2742,6 @@ commit_done:
     goto done;
   }
   GST_OBJECT_UNLOCK (sink);
-#endif
 
   ret = GST_FLOW_OK;
 done:
