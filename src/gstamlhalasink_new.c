@@ -405,7 +405,7 @@ static int get_sysfs_uint32(const char *path, uint32_t *value);
 static int config_sys_node(const char* path, const char* value);
 #endif
 static void check_pause_pts (GstAmlHalAsink *sink, GstClockTime ts);
-static void vol_ramp(guchar * data, gint size, int dir);
+static void vol_ramp(guchar * data, gint size, gint ch_num, int dir);
 #ifdef ENABLE_MS12
 static void hal_set_player_overwrite (GstAmlHalAsink * sink, gboolean defaults);
 #endif
@@ -2667,14 +2667,14 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
         // PCM volume ramping down
         GST_DEBUG_OBJECT(sink, "PCM volume ramping down %" PRId64 "ms @%" PRId64 " size %d",
           priv->gap_start_pts, time, size);
-        vol_ramp(data, size, RAMP_DOWN);
+        vol_ramp(data, size, (priv->channel_mask_ == AUDIO_CHANNEL_OUT_5POINT1) ? 6 : 2, RAMP_DOWN);
         hal_commit (sink, data, size, time);
 
         // insert silence
         if (priv->gap_duration > 0) {
           GST_DEBUG_OBJECT(sink, "PCM insert silence %d ms", priv->gap_duration);
           int32_t filled_ms = 0;
-          int32_t bytes_per_ms = 48 * 4;
+          int32_t bytes_per_ms = 48 * 2 * (priv->channel_mask_ == AUDIO_CHANNEL_OUT_5POINT1) ? 6 : 2;
           uint8_t *silence = (uint8_t *)g_malloc(16 * bytes_per_ms);
           if (silence) {
             memset(silence, 0, 16 * bytes_per_ms);
@@ -2707,7 +2707,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       } else if (priv->gap_state == GAP_RAMP_UP) {
         // PCM volume ramping up
         GST_DEBUG_OBJECT(sink, "PCM volume ramping up @%" PRId64 " size %d", time, size);
-        vol_ramp(data, size, RAMP_UP);
+        vol_ramp(data, size, (priv->channel_mask_ == AUDIO_CHANNEL_OUT_5POINT1) ? 6 : 2, RAMP_UP);
         hal_commit (sink, data, size, time);
         priv->gap_state = GAP_IDLE;
       } else {
@@ -3749,25 +3749,25 @@ static void diag_print(GstAmlHalAsink * sink, uint32_t pts_90k)
   }
 }
 
-/* audio gap is for Netflix, 2ch AAC is the only use case */
-static void vol_ramp(guchar * data, gint size, int dir)
+/* audio gap is for Netflix 2ch AAC, 2/6ch LPCM PCM16_LE are the only cases */
+static void vol_ramp(guchar * data, gint size, gint ch_num, int dir)
 {
-  int i;
-  int frames = size / 4;
-  int16_t *l = (int16_t *)(data);
-  int16_t *r = l + 1;
+  int i, ch;
+  int frames = size / 2 / ch_num;
+
+  int16_t *p = (int16_t *)(data);
 
   if (dir == RAMP_DOWN) {
-    for (i = 0; i < frames; i++, l+=2, r+=2) {
+    for (i = 0; i < frames; i++) {
       float t = (float)(i) / frames;
-      *l *= 1.0f - t * t * t;
-      *r *= 1.0f - t * t * t;
+      for (ch = 0; ch < ch_num; ch++)
+        *p++ *= 1.0f - t * t * t;
     }
   } else {
-     for (i = 0; i < frames; i++, l+=2, r+=2) {
+     for (i = 0; i < frames; i++) {
       float t = (float)i / frames - 1.0;
-      *l *= t * t * t + 1;
-      *r *= t * t * t + 1;
+      for (ch = 0; ch < ch_num; ch++)
+        *p++ *= t * t * t + 1;
     }
   }
 }
