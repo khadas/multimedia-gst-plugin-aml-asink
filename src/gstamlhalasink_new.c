@@ -497,7 +497,7 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   g_object_class_install_property (gobject_class, PROP_DISABLE_XRUN_TIMER,
       g_param_spec_boolean ("disable-xrun", "Disable underrun timer auto pause",
           "If the audio stream is not stable like in Mircast case, set it to prevent unexpected pause",
-          FALSE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+          TRUE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AVSYNC_SESSION,
       g_param_spec_int ("avsync-session", "avsync session",
@@ -666,6 +666,7 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->sync_mode = AV_SYNC_MODE_AMASTER;
   priv->session_id = -1;
   priv->stream_volume = 1.0;
+  priv->disable_xrun = TRUE;
   priv->ms12_enable = false;
 #ifdef ENABLE_MS12
   priv->ac4_pat = 255;
