@@ -9,7 +9,7 @@ echo $BASE
 MAJORVERSION=1
 
 #minor version
-MINORVERSION=2
+MINORVERSION=4
 
 #modue name/
 MODULE_NAME=MM-module-name:gst-plugin-aml-asink

@@ -1,8 +1,19 @@
 Major_V=1
-Minor_V=3
-BaseChangeId=I1d0de9122af433d2c99013c392fedfce3d781871
+Minor_V=4
+BaseChangeId= I6c33d2983fc2be8818e590163009aa00a893c442
 
 #history version
+#V1.3.228 Release Notes
+#Release_ChangeId_V1_2= I6c33d2983fc2be8818e590163009aa00a893c442
+#support heaac with ms12
+#start xrun after got the first data
+#delay xrun timer in paused state
+#remove lock during get position
+#disable xrun thread default
+#delete clock when tts-mode
+#PTS calculation error causing AV out of sync
+#refine audio switch logic
+
 #V1.2.209 Release Notes
 #Release_ChangeId_V1_2=I5cc03af8180b399a73245359ae5c9f56cb16d540
 #use mediasync depends environment setting

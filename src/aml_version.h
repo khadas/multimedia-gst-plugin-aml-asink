@@ -24,7 +24,12 @@ extern "C" {
 #endif
 
 const char libVersion[]=
-"MM-module-name:gst-plugin-aml-asink,version:1.0.1-r184-g72ac558";
+"MM-module-name:gst-plugin-aml-asink,version:1.3.228-g207e00d";
+
+const char libFeatures[]=
+"MM-module-feature: support ac3,eac3,ac4,mpeg(version 4),dts,lpcm \n" \
+"MM-module-feature: support mSync and mediasyn for av sync module \n" \
+"MM-module-feature: support Speaker,HDMI Tx,HDMI ARC, SPDIF output port\n";
 
 #ifdef  __cplusplus
 }
