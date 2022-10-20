@@ -2373,8 +2373,8 @@ static gpointer xrun_thread(gpointer para)
           GST_OBJECT_UNLOCK (sink);
         } else {
           if (!priv->disable_xrun) {
-            priv->xrun_paused = true;
-            hal_pause (sink);
+            //priv->xrun_paused = true;
+            //hal_pause (sink);
             GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
           }
           g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
@@ -2390,8 +2390,8 @@ static gpointer xrun_thread(gpointer para)
           continue;
         }
         GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-        priv->xrun_paused = true;
-        hal_pause (sink);
+        //priv->xrun_paused = true;
+        //hal_pause (sink);
         g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
       }
     }
