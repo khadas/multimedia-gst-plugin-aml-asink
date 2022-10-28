@@ -496,7 +496,7 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_DISABLE_XRUN_TIMER,
       g_param_spec_boolean ("disable-xrun", "Disable underrun timer auto pause",
-          "If the audio stream is not stable like in Mircast case, set it to prevent unexpected pause",
+          "obsolete property will remove after v2.0",
           TRUE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AVSYNC_SESSION,
@@ -666,7 +666,6 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->sync_mode = AV_SYNC_MODE_AMASTER;
   priv->session_id = -1;
   priv->stream_volume = 1.0;
-  priv->disable_xrun = TRUE;
   priv->ms12_enable = false;
 #ifdef ENABLE_MS12
   priv->ac4_pat = 255;
@@ -764,7 +763,6 @@ static int avsync_get_time(GstAmlHalAsink* sink, pts90K *pts)
       rc = -1;
     }
 
-exit:
     return rc;
 }
 
@@ -2344,14 +2342,6 @@ static gpointer xrun_thread(gpointer para)
     }
     if (!priv->xrun_paused &&
            g_timer_elapsed(priv->xrun_timer, NULL) > 0.4) {
-      /* disable auto pause feature */
-      if (priv->disable_xrun) {
-        GST_INFO_OBJECT (sink, "xrun timer fired 0.7s no data coming");
-        g_timer_start(priv->xrun_timer);
-        g_timer_stop(priv->xrun_timer);
-        continue;
-      }
-
       if (priv->ms12_enable) {
         char *status = priv->hw_dev_->get_parameters (priv->hw_dev_,
             "main_input_underrun");
@@ -2372,11 +2362,6 @@ static gpointer xrun_thread(gpointer para)
           priv->eos = TRUE;
           GST_OBJECT_UNLOCK (sink);
         } else {
-          if (!priv->disable_xrun) {
-            //priv->xrun_paused = true;
-            //hal_pause (sink);
-            GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-          }
           g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
           GST_WARNING_OBJECT (sink, "xrun signaled");
         }
@@ -2389,10 +2374,8 @@ static gpointer xrun_thread(gpointer para)
           g_timer_stop(priv->xrun_timer);
           continue;
         }
-        GST_INFO_OBJECT (sink, "xrun timer triggered pause audio");
-        //priv->xrun_paused = true;
-        //hal_pause (sink);
         g_signal_emit (G_OBJECT (sink), g_signals[SIGNAL_XRUN], 0, 0, NULL);
+        GST_WARNING_OBJECT (sink, "xrun signaled");
       }
     }
     usleep(50000);
@@ -2674,7 +2657,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
         if (priv->gap_duration > 0) {
           GST_DEBUG_OBJECT(sink, "PCM insert silence %d ms", priv->gap_duration);
           int32_t filled_ms = 0;
-          int32_t bytes_per_ms = 48 * 2 * (priv->channel_mask_ == AUDIO_CHANNEL_OUT_5POINT1) ? 6 : 2;
+          int32_t bytes_per_ms = 48 * 2 * ((priv->channel_mask_ == AUDIO_CHANNEL_OUT_5POINT1) ? 6 : 2);
           uint8_t *silence = (uint8_t *)g_malloc(16 * bytes_per_ms);
           if (silence) {
             memset(silence, 0, 16 * bytes_per_ms);
