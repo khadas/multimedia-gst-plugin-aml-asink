@@ -400,6 +400,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data, gint size, guint6
 static uint32_t hal_get_latency (GstAmlHalAsink * sink);
 static void dump(const char* path, const uint8_t *data, int size);
 static int create_av_sync(GstAmlHalAsink *sink);
+static void stop_xrun_thread (GstAmlHalAsink * sink);
 #if 0
 static int get_sysfs_uint32(const char *path, uint32_t *value);
 static int config_sys_node(const char* path, const char* value);
@@ -1605,6 +1606,7 @@ static gboolean gst_aml_hal_asink_setcaps (GstAmlHalAsink* sink,
   GST_DEBUG_OBJECT (sink, "release old hal");
 
   /* release old ringbuffer */
+  stop_xrun_thread (sink);
   GST_OBJECT_LOCK (sink);
   hal_release (sink);
   priv->flushing_ = FALSE;
@@ -2785,6 +2787,7 @@ static void paused_to_ready(GstAmlHalAsink *sink)
 
   /* make sure we unblock before calling the parent state change
    * so it can grab the STREAM_LOCK */
+  stop_xrun_thread (sink);
   GST_OBJECT_LOCK (sink);
   hal_release (sink);
   priv->quit_clock_wait = TRUE;
@@ -3314,7 +3317,6 @@ static gboolean hal_release (GstAmlHalAsink * sink)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GST_INFO_OBJECT (sink, "enter");
 
-  stop_xrun_thread (sink);
   hal_stop(sink);
   g_mutex_lock(&priv->feed_lock);
   if (priv->stream_) {
