@@ -4,7 +4,7 @@ BaseChangeId= I6c33d2983fc2be8818e590163009aa00a893c442
 
 #history version
 #V1.3.228 Release Notes
-#Release_ChangeId_V1_2= I6c33d2983fc2be8818e590163009aa00a893c442
+#Release_ChangeId_V1_3= I6c33d2983fc2be8818e590163009aa00a893c442
 #support heaac with ms12
 #start xrun after got the first data
 #delay xrun timer in paused state
