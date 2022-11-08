@@ -1987,6 +1987,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       priv->received_eos = TRUE;
       GST_OBJECT_LOCK (sink);
       if (priv->xrun_timer) {
+        g_timer_start (priv->xrun_timer);
         g_timer_stop (priv->xrun_timer);
         priv->xrun_paused = false;
       }
@@ -2036,6 +2037,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       GST_OBJECT_LOCK (sink);
       hal_stop (sink);
       if (priv->xrun_timer) {
+        g_timer_start (priv->xrun_timer);
         g_timer_stop(priv->xrun_timer);
         priv->xrun_paused = false;
       }
@@ -2158,6 +2160,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
 
       GST_OBJECT_LOCK (sink);
       if (priv->xrun_timer) {
+        g_timer_start (priv->xrun_timer);
         g_timer_stop (priv->xrun_timer);
         priv->xrun_paused = false;
       }
