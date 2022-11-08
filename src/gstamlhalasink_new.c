@@ -2034,6 +2034,8 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       gst_event_parse_flush_stop (event, &reset_time);
       GST_DEBUG_OBJECT (sink, "flush stop");
       GST_OBJECT_LOCK (sink);
+      if (priv->tempo_used)
+        scaletempo_start (&priv->st);
       hal_stop (sink);
       if (priv->xrun_timer) {
         g_timer_stop(priv->xrun_timer);
