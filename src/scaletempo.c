@@ -445,6 +445,7 @@ gboolean scaletempo_set_info (struct scale_tempo * scaletempo, GstAudioInfo * in
 gboolean scaletempo_start (struct scale_tempo * scaletempo)
 {
   scaletempo->reinit_buffers = TRUE;
+  scaletempo->bytes_queued = 0;
 
   return TRUE;
 }
