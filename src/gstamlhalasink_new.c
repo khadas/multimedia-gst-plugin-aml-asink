@@ -2974,6 +2974,13 @@ gst_aml_hal_asink_change_state (GstElement * element,
     {
       GstBaseSink* bsink = GST_BASE_SINK_CAST (sink);
       GST_INFO_OBJECT(sink, "playing to paused");
+      if (!priv->ms12_enable) {
+        GST_OBJECT_LOCK (sink);
+        if (priv->hw_dev_)
+          priv->hw_dev_->set_parameters(priv->hw_dev_, "gst_pause=1");
+        GST_OBJECT_UNLOCK (sink);
+        usleep(60*1000);
+      }
       if (priv->avsync && priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
         GST_INFO_OBJECT(sink, "avsync to free run");
         av_sync_change_mode (priv->avsync, AV_SYNC_MODE_FREE_RUN);
