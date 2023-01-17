@@ -2045,7 +2045,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       }
       GST_OBJECT_UNLOCK (sink);
 
-      gst_aml_hal_asink_reset_sync (sink, TRUE);
+      gst_aml_hal_asink_reset_sync (sink, !reset_time);
       if (reset_time) {
         GST_DEBUG_OBJECT (sink, "posting reset-time message");
         gst_element_post_message (GST_ELEMENT_CAST (sink),
