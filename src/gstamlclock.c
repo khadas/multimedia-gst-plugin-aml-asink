@@ -83,6 +83,10 @@ gst_aml_clock_init (GstAmlClock * clock)
 #else
   GstAmlClockPrivate *priv = GST_AML_CLOCK_GET_PRIVATE (clock);
 #endif
+//if bb file set --enable-mediasync=yes, enable mediasync default
+#ifdef ENABLE_MEDIA_SYNC
+  priv->type = GST_AML_CLOCK_TYPE_MEDIASYNC;
+#endif
   const char *env = getenv("AML_AV_SYNC_TYPE");
   clock->priv = priv;
   priv->session_id = -1;

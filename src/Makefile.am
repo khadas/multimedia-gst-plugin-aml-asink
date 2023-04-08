@@ -48,6 +48,10 @@ libgstamlhalasink_la_CFLAGS += -DESSOS_RM
 libgstamlhalasink_la_LIBADD += -lessosrmgr
 endif
 
+if MEDIA_SYNC
+libgstamlhalasink_la_CFLAGS += -DENABLE_MEDIA_SYNC
+endif
+
 # headers we need but don't want installed
 #noinst_HEADERS =
 include_HEADERS = gstamlclock.h gstamlhalasink_new.h mediasync_wrap.h
