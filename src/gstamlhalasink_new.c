@@ -3253,7 +3253,7 @@ aml_open_output_stream (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
   config.format = priv->format_;
 
   if (priv->tts_mode_)
-    flag = AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_PRIMARY;
+    flag = AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_PRIMARY;
   else if (priv->direct_mode_)
     flag = AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_HW_AV_SYNC;
   else
