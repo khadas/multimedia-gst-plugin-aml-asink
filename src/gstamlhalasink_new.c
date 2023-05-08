@@ -499,7 +499,7 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AVSYNC_SESSION,
       g_param_spec_int ("avsync-session", "avsync session",
         "avsync session id to link video and audio. If set, this sink won't create clock",
-        G_MININT, G_MAXINT, 0, G_PARAM_WRITABLE));
+        G_MININT, G_MAXINT, 0, G_PARAM_READWRITE));
 
   g_object_class_install_property (gobject_class,
       PROP_WAIT_FOR_VIDEO,
