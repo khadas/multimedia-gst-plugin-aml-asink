@@ -8,16 +8,16 @@ echo $BASE
 #major version
 MAJORVERSION=1
 
-#minor version
-MINORVERSION=4
+#current minor version,if release a new version,please update it
+MINORVERSION=5
 
-#release version commit id
-RELEASE_COMMIT_ID=a3934e5
+#release version commit id,please store commit id here every release version
+RELEASE_COMMIT_ID=6f9fa9fa
 
 #modue name/
 MODULE_NAME=MM-module-name:gst-plugin-aml-asink
 
-#get all commit count
+#get all commit count from last release version
 COMMIT_COUNT=$(git rev-list $RELEASE_COMMIT_ID..HEAD --count)
 echo commit count $COMMIT_COUNT
 
@@ -31,6 +31,7 @@ MODULE_NAME_LINE=`sed -n '/\"MM-module-name/=' src/aml_version.h`
 
 #version rule string
 VERSION_STRING=${MAJORVERSION}.${MINORVERSION}.${COMMIT_COUNT}-g${COMMIT_ID}
+echo version: $VERSION_STRING
 
 #update the original version
 if [ ${MODULE_NAME_LINE} -gt 0 ]; then

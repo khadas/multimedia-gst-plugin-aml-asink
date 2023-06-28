@@ -1,10 +1,25 @@
 Major_V=1
-Minor_V=4
-BaseChangeId= I6c33d2983fc2be8818e590163009aa00a893c442
+Minor_V=5
+BaseChangeId=I2b72e9ceb7fab72690125b432d91dca3fc4ad902
 
 #history version
+#V1.4.15 Release Notes
+#Release_ChangeId_V1_3=I2b72e9ceb7fab72690125b432d91dca3fc4ad902
+#reset position when flush event has reset bit
+#send pause event to audiohal
+#fix crash when write error for non-direct-mode
+#enable xrun signal and suppress disable-xrun property
+#changed avsync-session property readable and writeable
+#remove DIRECT flag for TTS
+#enable multi-channel pcm send to audiohal
+#use mediasync if defined
+#fix xrun timeout after flush
+#fix pop noise after flush
+#fix pop noise after flush
+#release lock when stop_xrun_thread
+
 #V1.3.19 Release Notes
-#Release_ChangeId_V1_3= I6c33d2983fc2be8818e590163009aa00a893c442
+#Release_ChangeId_V1_3=I6c33d2983fc2be8818e590163009aa00a893c442
 #support heaac with ms12
 #start xrun after got the first data
 #delay xrun timer in paused state

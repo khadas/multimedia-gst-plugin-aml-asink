@@ -24,7 +24,7 @@ extern "C" {
 #endif
 
 const char libVersion[]=
-"MM-module-name:gst-plugin-aml-asink,version:1.3.228-g207e00d";
+"MM-module-name:gst-plugin-aml-asink,version:1.4.15-g6f9fa9f";
 
 const char libFeatures[]=
 "MM-module-feature: support ac3,eac3,ac4,mpeg(version 4),dts,lpcm \n" \
