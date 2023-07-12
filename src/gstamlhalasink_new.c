@@ -84,6 +84,8 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_AUDIO_FORMAT_TYPE_LPCM_PRIV1 102
 #define GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2 103
 #define GST_AUDIO_FORMAT_TYPE_LPCM_TS 104
+#define GST_AUDIO_FORMAT_TYPE_TRUE_HD 105
+
 #define PTS_90K 90000
 #define HAL_INVALID_PTS (GST_CLOCK_TIME_NONE - 1)
 static const char kCustomInstantRateChangeEventName[] = "custom-instant-rate-change";
@@ -291,6 +293,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       "audio/x-eac3, "
       COMMON_AUDIO_CAPS "; "
       "audio/x-ac4; "
+      "audio/x-true-hd; "
 #ifdef ENABLE_MS12
       "audio/mpeg, mpegversion=4, stream-format=(string){loas}; "
 #endif
@@ -1494,7 +1497,13 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     info.bpf = 1;
     info.channels = 2;
     info.rate = 48000;
-  } else if (g_str_equal (mimetype, "audio/x-eac3")) {
+  } else if (g_str_equal (mimetype, "audio/x-true-hd")) {
+    spec->type = GST_AUDIO_FORMAT_TYPE_TRUE_HD;
+    /* to pass the sanity check in render() */
+    info.bpf = 1;
+    info.channels = 2;
+    info.rate = 48000;
+   } else if (g_str_equal (mimetype, "audio/x-eac3")) {
     /* extract the needed information from the cap */
     if (!(gst_structure_get_int (structure, "rate", &info.rate)))
       goto parse_error;
@@ -3167,6 +3176,9 @@ hal_parse_spec (GstAmlHalAsink * sink, GstAudioRingBufferSpec * spec)
     case GST_AUDIO_FORMAT_TYPE_AC4:
       priv->format_ = AUDIO_FORMAT_AC4;
       break;
+    case GST_AUDIO_FORMAT_TYPE_TRUE_HD:
+      priv->format_ = AUDIO_FORMAT_DOLBY_TRUEHD;
+      break;
     case GST_AUDIO_RING_BUFFER_FORMAT_TYPE_EAC3:
       priv->format_ = AUDIO_FORMAT_E_AC3;
       break;
@@ -3665,6 +3677,8 @@ static int parse_bit_stream(GstAmlHalAsink *sink,
     priv->sync_frame = info.sync_frame;
     GST_DEBUG_OBJECT (sink, "sr:%d spf:%d sync:%d",
       priv->sr_, priv->sample_per_frame, priv->sync_frame);
+    return 0;
+  } else if (spec->type == GST_AUDIO_FORMAT_TYPE_TRUE_HD) {
     return 0;
   }
   return -1;
