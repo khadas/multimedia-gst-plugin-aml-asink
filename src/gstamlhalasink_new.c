@@ -233,6 +233,8 @@ struct _GstAmlHalAsinkPrivate
   gboolean is_ad_audio;
   struct ad_des des_ad;
 #endif
+  guint64 clip_front;
+  guint64 clip_back;
 };
 
 enum
@@ -722,6 +724,8 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->des_ad.g_c = priv->des_ad.g_f = priv->des_ad.g_s = -1;
 #endif
   priv->aligned_timeout = -1;
+  priv->clip_front = 0;
+  priv->clip_back  = 0;
   g_mutex_init (&priv->feed_lock);
   g_cond_init (&priv->run_ready);
   scaletempo_init (&priv->st);
@@ -2988,11 +2992,38 @@ wrong_size:
   }
 }
 
+/*|->..............org data buffer.............<-|*
+ *|->clip_front<-|..remain buffer..|->clip_back<-|*/
+static void
+aml_hal_clip_buf_by_meta (GstAmlHalAsink *sink, GstBuffer *buf)
+{
+    GstAmlHalAsinkPrivate *priv  = sink->priv;
+    GstAudioClippingMeta *cmeta  = NULL;
+    GstAudioRingBufferSpec *spec = &priv->spec;
+
+    cmeta = gst_buffer_get_audio_clipping_meta (buf);
+    if (!cmeta || (GST_FORMAT_TIME != cmeta->format))
+    {
+        //cleanup clip info here
+        priv->clip_front = 0;
+        priv->clip_back  = 0;
+        return;
+    }
+
+    if (!is_raw_type(spec->type))
+    {
+        //not raw type, just transfer the cmeta info to audio hal side.
+        priv->clip_front = cmeta->start;
+        priv->clip_back  = cmeta->end;
+    }
+    return;
+}
+
 static GstFlowReturn
 gst_aml_hal_asink_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
   GstAmlHalAsink *sink = GST_AML_HAL_ASINK (parent);
-
+  aml_hal_clip_buf_by_meta(sink, buf);
   return gst_aml_hal_asink_render (sink, buf);
 }
 
@@ -3908,40 +3939,73 @@ struct hw_sync_header_v2 {
   uint8_t offset[4]; /* big endian */
 };
 
+struct hw_sync_header_v3 {
+  uint8_t version[4];
+  uint8_t size[4]; /* big endian */
+  uint8_t pts[8];  /* big endian */
+  uint8_t offset[4]; /* big endian */
+  uint8_t c_start_duration[8];  /* big endian */
+  uint8_t c_end_duration[8];    /* big endian */
+};
+
+static void hw_sync_set_header_ver(uint8_t aversion[], uint8_t ver_no)
+{
+  aversion[0] = 0x55;
+  aversion[1] = 0x55;
+  aversion[2] = 0;
+  aversion[3] = ver_no;
+}
+
+static void hw_sync_set_header_pts(uint8_t apts[], uint64_t pts_64)
+{
+    apts[0] = (pts_64&0xff00000000000000ull) >> 56;
+    apts[1] = (pts_64&0x00ff000000000000ull) >> 48;
+    apts[2] = (pts_64&0x0000ff0000000000ull) >> 40;
+    apts[3] = (pts_64&0x000000ff00000000ull) >> 32;
+    apts[4] = (pts_64&0x00000000ff000000ull) >> 24;
+    apts[5] = (pts_64&0x0000000000ff0000ull) >> 16;
+    apts[6] = (pts_64&0x000000000000ff00ull) >> 8;
+    apts[7] = (pts_64&0x00000000000000ffull);
+}
+
+static void hw_sync_set_header_size(uint8_t asize[], uint32_t size)
+{
+  asize[0] = (size&0xFF000000) >> 24;
+  asize[1] = (size&0xFF0000) >> 16;
+  asize[2] = (size&0xFF00) >> 8;
+  asize[3] = (size&0xFF);
+}
+
+static void hw_sync_set_header_offset(uint8_t aoffset[], uint32_t offset)
+{
+  aoffset[0] = (offset & 0xFF000000) >> 24;
+  aoffset[1] = (offset & 0xFF0000) >> 16;
+  aoffset[2] = (offset & 0xFF00) >> 8;
+  aoffset[3] = (offset & 0xFF);
+}
 static void hw_sync_set_ver(struct hw_sync_header_v2* header)
 {
-  header->version[0] = 0x55;
-  header->version[1] = 0x55;
-  header->version[2] = 0;
-  header->version[3] = 0x02;
+  hw_sync_set_header_ver(header->version, 0x02);
+}
+
+static void hw_sync_set_ver_v3(struct hw_sync_header_v2* header)
+{
+  hw_sync_set_header_ver(header->version, 0x03);
 }
 
 static void hw_sync_set_size(struct hw_sync_header_v2* header, uint32_t size)
 {
-  header->size[0] = (size&0xFF000000) >> 24;
-  header->size[1] = (size&0xFF0000) >> 16;
-  header->size[2] = (size&0xFF00) >> 8;
-  header->size[3] = (size&0xFF);
+  hw_sync_set_header_size(header->size, size);
 }
 
 static void hw_sync_set_pts(struct hw_sync_header_v2* header, uint64_t pts_64)
 {
-  header->pts[0] = (pts_64&0xFF00000000000000ull) >> 56;
-  header->pts[1] = (pts_64&0x00ff000000000000ull) >> 48;
-  header->pts[2] = (pts_64&0x0000ff0000000000ull) >> 40;
-  header->pts[3] = (pts_64&0x000000ff00000000ull) >> 32;
-  header->pts[4] = (pts_64&0x00000000ff000000ull) >> 24;
-  header->pts[5] = (pts_64&0x0000000000ff0000ull) >> 16;
-  header->pts[6] = (pts_64&0x000000000000ff00ull) >> 8;
-  header->pts[7] = (pts_64&0x00000000000000ffull);
+  hw_sync_set_header_pts(header->pts, pts_64);
 }
 
 static void hw_sync_set_offset(struct hw_sync_header_v2* header, uint32_t offset)
 {
-  header->offset[0] = (offset & 0xFF000000) >> 24;
-  header->offset[1] = (offset & 0xFF0000) >> 16;
-  header->offset[2] = (offset & 0xFF00) >> 8;
-  header->offset[3] = (offset & 0xFF);
+  hw_sync_set_header_offset(header->offset, offset);
 }
 
 static void dump(const char* path, const uint8_t *data, int size) {
@@ -4003,8 +4067,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
   guint towrite;
   gboolean raw_data;
   guint offset = 0;
-  guint hw_header_s = sizeof (struct hw_sync_header_v2);
-
+  guint hw_header_s = sizeof (struct hw_sync_header_v3);
   if (!priv->stream_) {
     GST_WARNING_OBJECT (sink, "stream closed");
     return 0;
@@ -4023,12 +4086,13 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
 
   /* notify EOS */
   if (!towrite && priv->direct_mode_) {
-    struct hw_sync_header_v2 header;
-
-    hw_sync_set_ver(&header);
-    hw_sync_set_size(&header, 0);
-    hw_sync_set_pts(&header, -1);
-    hw_sync_set_offset(&header, 0);
+    struct hw_sync_header_v3 header;
+    hw_sync_set_ver_v3(&header);
+    hw_sync_set_header_size(header.size, 0);
+    hw_sync_set_header_pts(header.pts, -1);
+    hw_sync_set_header_pts(header.c_start_duration, 0);
+    hw_sync_set_header_pts(header.c_end_duration, 0);
+    hw_sync_set_header_offset(header.offset, 0);
     priv->stream_->write(priv->stream_, &header, hw_header_s);
     return 0;
   }
@@ -4081,7 +4145,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
         trans = true;
     }
     if (priv->direct_mode_) {
-      struct hw_sync_header_v2 *hw_sync;
+      struct hw_sync_header_v3 *hw_sync;
       uint32_t pts_32 = -1;
 
       //truncate to 32bit PTS
@@ -4095,8 +4159,7 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
       }
 
       if (!trans) {
-        hw_sync = (struct hw_sync_header_v2 *)priv->trans_buf;
-
+        hw_sync = (struct hw_sync_header_v3 *)priv->trans_buf;
         if (cur_size > MAX_TRANS_BUF_SIZE - hw_header_s) {
           if (raw_data) {
             /* truncate and alight to 16B */
@@ -4118,14 +4181,20 @@ static guint hal_commit (GstAmlHalAsink * sink, guchar * data,
           GST_ERROR_OBJECT(sink, "header too big %d", header_size);
           return offset;
         }
-        hw_sync = (struct hw_sync_header_v2 *)(trans_data - hw_header_s);
+        hw_sync = (struct hw_sync_header_v3 *)(trans_data - hw_header_s);
         trans_data -= hw_header_s;
       }
 
-      hw_sync_set_ver(hw_sync);
-      hw_sync_set_size(hw_sync, cur_size);
-      hw_sync_set_pts(hw_sync, pts_64);
-      hw_sync_set_offset(hw_sync, 0);
+      if (0 == size) {
+        priv->clip_front = 0;
+        priv->clip_back  = 0;
+      }
+      hw_sync_set_ver_v3(hw_sync);
+      hw_sync_set_header_size(hw_sync->size, cur_size);
+      hw_sync_set_header_pts(hw_sync->pts, pts_64);
+      hw_sync_set_header_pts(hw_sync->c_start_duration, priv->clip_front);
+      hw_sync_set_header_pts(hw_sync->c_end_duration, priv->clip_back);
+      hw_sync_set_header_offset(hw_sync->offset, 0);
       cur_size += hw_header_s;
 
       if (priv->diag_log_enable && pts_32 != -1)
