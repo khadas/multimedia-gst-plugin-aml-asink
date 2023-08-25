@@ -47,6 +47,7 @@
 #include "aml_avsync_log.h"
 #include "aml_version.h"
 #include "mediasync_wrap.h"
+#include "gstparam_time_pair.h"
 
 #ifdef ESSOS_RM
 #include "essos-resmgr.h"
@@ -254,6 +255,7 @@ enum
   PROP_WAIT_FOR_VIDEO,
   PROP_SEAMLESS_SWITCH,
   PROP_DISABLE_TEMPO_STRETCH,
+  PROP_TIME_PAIR,
 #ifdef ENABLE_MS12
   /* AC4 config */
   PROP_AC4_P_GROUP_IDX,
@@ -280,6 +282,12 @@ enum
   SIGNAL_AUDSWITCH,
   MAX_SIGNAL
 };
+
+typedef enum
+{
+  POS_WALL = 0,
+  POS_APTS,
+} pos_t;
 
 #define COMMON_AUDIO_CAPS \
   "channels = (int) [ 1, MAX ], " \
@@ -527,6 +535,13 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
           "Disable tempo stretch", "Disable the tempo stretch process", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class,
+      PROP_TIME_PAIR,
+      gst_param_spec_time_pair ("pts-mono-pair",
+          "pts mono pair", "pts and system mono time pair",
+          0, 0,
+          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+
 #ifdef ENABLE_MS12
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_AC4_P_GROUP_IDX,
       g_param_spec_int ("ac4-presentation-group-index", "ac4 presentation group index",
@@ -766,24 +781,26 @@ gst_aml_hal_asink_is_self_provided_clock (GstAmlHalAsink* sink)
   return (priv->provided_clock && GST_IS_AML_CLOCK (priv->provided_clock));
 }
 
-static int avsync_get_time(GstAmlHalAsink* sink, pts90K *pts)
+static int avsync_get_time(GstAmlHalAsink* sink, pos_t pos_type, pts90K *pts, uint64_t *mono)
 {
     int rc = 0;
     GstAmlHalAsinkPrivate *priv = sink->priv;
 
     if (!g_atomic_pointer_compare_and_exchange (&priv->avsync, NULL, NULL)) {
-      rc = av_sync_get_clock(priv->avsync, pts);
-    } else {
-      rc = -1;
+      if (POS_WALL == pos_type)
+        rc = av_sync_get_clock(priv->avsync, pts);
+      else if (POS_APTS == pos_type)
+        rc = av_sync_get_pos(priv->avsync, pts, mono);
     }
 
     return rc;
 }
 
 static gboolean
-get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
+get_position (GstAmlHalAsink* sink, GstFormat format, pos_t pos_type, gint64 * cur, guint64 *pmono)
 {
   GstAmlHalAsinkPrivate *priv = sink->priv;
+  uint64_t mono = 0;
   pts90K pcr = 0;
   gint64 timepassed, timepassed_90k;
   int rc;
@@ -806,7 +823,10 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
 
   if (!priv->provided_clock) {
     //TODO(song): get HAL position
-    *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
+    if (priv->sr_)
+      *cur = gst_util_uint64_scale_int(priv->render_samples, GST_SECOND, priv->sr_);
+    if (pmono)
+      *pmono = 0;
   } else if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC) {
     GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
     if (aclock->handle) {
@@ -822,10 +842,15 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
       }
       *cur = gst_util_uint64_scale_int(*cur, GST_SECOND, GST_MSECOND);
     }
+    if (pmono)
+      *pmono = 0;
   } else {
-    rc = avsync_get_time(sink, &pcr);
+    rc = avsync_get_time(sink, pos_type, &pcr, &mono);
     if (rc)
         return FALSE;
+
+    if (pmono)
+      *pmono = mono;
 
     if (pcr == -1) {
       if ((priv->paused_ || priv->xrun_paused) && priv->last_pcr != -1) {
@@ -839,6 +864,8 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
                 (int)(priv->first_pts - pcr) < 90000 &&
                 priv->sync_mode == AV_SYNC_MODE_AMASTER) {
       pcr = priv->first_pts;
+      if (pmono)
+        *pmono = 0;
       GST_LOG_OBJECT (sink, "render start with delay, set to first_pts %u", pcr);
     }
 
@@ -908,7 +935,7 @@ gst_aml_hal_asink_query (GstElement * element, GstQuery * query)
       gst_query_parse_position (query, &format, NULL);
 
       /* first try to get the position based on the clock */
-      if ((res = get_position (sink, format, &cur))) {
+      if ((res = get_position (sink, format, POS_WALL, &cur, NULL))) {
         gst_query_set_position (query, format, cur);
         GST_LOG_OBJECT (sink, "position %lld format %s", cur, gst_format_get_name (format));
         check_pause_pts (sink, cur);
@@ -1036,7 +1063,7 @@ static GstClockTime gst_aml_hal_asink_get_time (GstClock * clock, GstAmlHalAsink
 {
   gint64 position = GST_CLOCK_TIME_NONE;
 
-  get_position (sink, GST_FORMAT_TIME, &position);
+  get_position (sink, GST_FORMAT_TIME, POS_WALL, &position, NULL);
   GST_LOG_OBJECT (sink, "time %" GST_TIME_FORMAT, GST_TIME_ARGS (position));
   return position;
 }
@@ -1485,6 +1512,28 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
     case PROP_STATS:
       g_value_take_boxed(value, sink_get_status (sink));
       break;
+    case PROP_TIME_PAIR:
+    {
+      gint64 cur = -1;
+      guint64 mono = 0;
+
+      if (get_position (sink, GST_FORMAT_TIME, POS_APTS, &cur, &mono)) {
+        /* don't change mono time if playback stops */
+        if (mono && !priv->paused_ && !priv->eos && !priv->group_done) {
+          uint64_t mono_ns;
+          struct timespec now;
+
+          clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+          mono_ns = now.tv_sec * 1000000000LL + now.tv_nsec;
+          cur += mono_ns - mono;
+          mono = mono_ns;
+        }
+        gst_value_set_time_pair (value, cur, mono);
+      } else {
+        gst_value_set_time_pair (value, -1, -1);
+      }
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -1836,6 +1885,7 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
   GstAmlHalAsinkPrivate *priv = sink->priv;
   GstFlowReturn ret = GST_FLOW_OK;
   pts90K pcr;
+  uint64_t mono = 0;
 
   if ((!priv->stream_) || (!priv->spec.info.rate) || (!priv->direct_mode_)) {
     return ret;
@@ -1851,7 +1901,7 @@ static GstFlowReturn sink_drain (GstAmlHalAsink * sink)
     priv->eos_time = priv->segment.stop;
   }
 
-  if (!avsync_get_time(sink, &pcr) && pcr == -1 && !priv->paused_) {
+  if (!avsync_get_time(sink, POS_WALL, &pcr, &mono) && pcr == -1 && !priv->paused_) {
     GST_DEBUG_OBJECT (sink, "playback not started return");
     return ret;
   }

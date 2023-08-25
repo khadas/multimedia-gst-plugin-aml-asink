@@ -1,17 +1,21 @@
 # Note: plugindir is set in configure
 
 ##############################################################################
-# TODO: change libgstplugin.la to something else, e.g. libmysomething.la     #
+# time pair parameter lib
 ##############################################################################
-plugin_LTLIBRARIES = libgstamlhalasink.la
+lib_LTLIBRARIES = libgstamltimepair.la
+libgstamltimepair_la_SOURCES = gstparam_time_pair.c
+
+libgstamltimepair_la_CFLAGS = $(GST_CFLAGS)
+libgstamltimepair_la_LIBADD = $(GST_LIBS)
+libgstamltimepair_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
+
+include_HEADERS = gstparam_time_pair.h
 
 ##############################################################################
-# TODO: for the next set of variables, name the prefix if you named the .la, #
-#  e.g. libmysomething.la => libmysomething_la_SOURCES                       #
-#                            libmysomething_la_CFLAGS                        #
-#                            libmysomething_la_LIBADD                        #
-#                            libmysomething_la_LDFLAGS                       #
+# plugin
 ##############################################################################
+plugin_LTLIBRARIES = libgstamlhalasink.la
 
 # sources used to compile this plug-in
 libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c \
@@ -26,7 +30,7 @@ libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c \
 libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS)
 libgstamlhalasink_la_LIBADD = $(GST_LIBS)
 libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
-libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync
+libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync -lgstamltimepair
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
 
 if AD
@@ -58,3 +62,13 @@ include_HEADERS = gstamlclock.h gstamlhalasink_new.h mediasync_wrap.h
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = amlhalasink.pc
+
+##############################################################################
+# test binary #
+##############################################################################
+#bin_PROGRAMS = ts_pair_test
+
+#ts_pair_test_SOURCES = param_time_pair_test.c gstparam_time_pair.c
+
+#ts_pair_test_CFLAGS = $(GST_CFLAGS)
+#ts_pair_test_LDADD = $(GST_LIBS)
