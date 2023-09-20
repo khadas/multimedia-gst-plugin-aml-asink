@@ -137,6 +137,10 @@ struct _GstAmlHalAsinkPrivate
   GstClockTime last_ts;
   guint64 render_samples;
 
+  /* for stats */
+  guint64 rendered_frames;
+  guint64 dropped_frames;
+
   /* for position */
   guint wrapping_time;
   uint32_t last_pcr;
@@ -265,6 +269,7 @@ enum
   PROP_AD_AUDIO,
 #endif
   PROP_A_WAIT_TIMEOUT,
+  PROP_STATS,
   PROP_LAST
 };
 
@@ -574,6 +579,15 @@ gst_aml_hal_asink_class_init (GstAmlHalAsinkClass * klass)
       g_param_spec_int ("a-wait-timeout", "audio timeout when video not come",
           "audio wait for video timeout if no video comes, effective when wait-video property is true.",
           -1, 10000, 0, G_PARAM_WRITABLE));
+
+#if GST_CHECK_VERSION(1, 18, 0)
+  g_object_class_override_property (gobject_class, PROP_STATS, "stats");
+#else
+  g_object_class_install_property (gobject_class, PROP_STATS,
+      g_param_spec_boxed ("stats", "Statistics",
+        "Sink Statistics", GST_TYPE_STRUCTURE,
+        (GParamFlags)(G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+#endif
 
   g_signals[SIGNAL_PAUSEPTS]= g_signal_new( "pause-pts-callback",
       G_TYPE_FROM_CLASS(GST_ELEMENT_CLASS(klass)),
@@ -1098,6 +1112,16 @@ static void remove_clock (GObject * object)
   GST_OBJECT_FLAG_UNSET (basesink, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
 }
 
+static GstStructure* sink_get_status (GstAmlHalAsink* sink)
+{
+  GstAmlHalAsinkPrivate *priv = sink->priv;
+
+  g_return_val_if_fail (sink != NULL, NULL);
+  return gst_structure_new ("application/x-gst-base-sink-stats",
+      "dropped", G_TYPE_UINT64, priv->dropped_frames,
+      "rendered", G_TYPE_UINT64, priv->rendered_frames, NULL);
+}
+
 static void
 gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     const GValue * value, GParamSpec * pspec)
@@ -1452,6 +1476,9 @@ static void gst_aml_hal_asink_get_property (GObject * object, guint property_id,
     case PROP_DISABLE_TEMPO_STRETCH:
       g_value_set_boolean (value, priv->tempo_disable);
       break;
+    case PROP_STATS:
+      g_value_take_boxed(value, sink_get_status (sink));
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -1700,6 +1727,8 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
     priv->start_buf = NULL;
   }
   priv->start_buf_sent = FALSE;
+  priv->dropped_frames = 0;
+  priv->rendered_frames = 0;
 
   if (!keep_position) {
     priv->render_samples = 0;
@@ -2447,14 +2476,19 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
 
   if (priv->flushing_) {
     ret = GST_FLOW_FLUSHING;
+    priv->dropped_frames++;
     goto done;
   }
 
-  if (G_UNLIKELY (!priv->stream_))
+  if (G_UNLIKELY (!priv->stream_)) {
+    priv->dropped_frames++;
     goto lost_resource;
+  }
 
-  if (G_UNLIKELY (priv->received_eos))
+  if (G_UNLIKELY (priv->received_eos)) {
+    priv->dropped_frames++;
     goto was_eos;
+  }
 
 #ifdef SUPPORT_AD
   if (priv->is_dual_audio || priv->is_ad_audio) {
@@ -2497,8 +2531,10 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   rate = GST_AUDIO_INFO_RATE (&priv->spec.info);
 
   size = gst_buffer_get_size (buf);
-  if (G_UNLIKELY (size % bpf) != 0)
+  if (G_UNLIKELY (size % bpf) != 0) {
+    priv->dropped_frames++;
     goto wrong_size;
+  }
 
   if (is_raw_type(priv->spec.type))
     samples = size / bpf;
@@ -2508,6 +2544,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   time = GST_BUFFER_TIMESTAMP (buf);
 
   if ((!GST_CLOCK_TIME_IS_VALID (time) && !priv->first_pts_set) && priv->direct_mode_) {
+    priv->dropped_frames++;
     GST_INFO_OBJECT (sink, "discard frame wo/ pts at beginning");
     goto done;
   }
@@ -2541,8 +2578,10 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
    * thrown away. All samples should also be clipped to the segment
    * boundaries */
   if (G_UNLIKELY (!gst_segment_clip (&clip_seg, GST_FORMAT_TIME, time, stop,
-              &ctime, &cstop)))
+              &ctime, &cstop))) {
+    priv->dropped_frames++;
     goto out_of_segment;
+  }
 
   priv->eos_time = cstop;
 
@@ -2569,6 +2608,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       GST_ERROR_OBJECT (sink, "out buffer fail %d", outsize);
       ret = GST_FLOW_ERROR;
       GST_OBJECT_UNLOCK (sink);
+      priv->dropped_frames++;
       goto done;
     }
     gst_buffer_copy_into (outbuffer, buf, GST_BUFFER_COPY_METADATA, 0, -1);
@@ -2580,6 +2620,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     if (ret != GST_FLOW_OK) {
       GST_OBJECT_UNLOCK (sink);
       GST_LOG_OBJECT (sink, "transform fail");
+      priv->dropped_frames++;
       goto done;
     }
 
@@ -2616,8 +2657,10 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
       GST_PAD_STREAM_LOCK(GST_BASE_SINK_PAD(sink));
   }
 
-  if (!priv->stream_)
+  if (!priv->stream_) {
+    priv->dropped_frames++;
     goto commit_done;
+  }
 
   /* update render_samples after pause logic */
   priv->render_samples += samples;
@@ -2627,6 +2670,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     gst_buffer_unmap (buf, &info);
     g_mutex_unlock(&priv->feed_lock);
     ret = GST_FLOW_FLUSHING;
+    priv->dropped_frames++;
     goto done;
   }
 
@@ -2651,6 +2695,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
         gst_buffer_unref (priv->start_buf);
         priv->start_buf = NULL;
         priv->start_buf_sent = TRUE;
+        priv->rendered_frames++;
         GST_DEBUG_OBJECT (sink, "sent cache start buf");
       }
   }
@@ -2724,6 +2769,7 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   } else {
     hal_commit (sink, data, size, time);
   }
+  priv->rendered_frames++;
 
 commit_done:
   g_mutex_unlock(&priv->feed_lock);
