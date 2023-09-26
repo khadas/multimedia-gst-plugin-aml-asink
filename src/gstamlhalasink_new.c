@@ -812,7 +812,13 @@ get_position (GstAmlHalAsink* sink, GstFormat format, gint64 * cur)
     if (aclock->handle) {
       mediasync_wrap_GetMediaTimeByType(aclock->handle, MEDIA_STC_TIME, MEDIASYNC_UNIT_US, cur);
       if (*cur < 0) {
-        *cur = 0;
+        *cur = priv->segment.start;
+        return TRUE;
+      } else if (priv->first_pts_set && (int)(priv->first_pts - (*cur * 90 / 1000)) > 0 &&
+                (int)(priv->first_pts - (*cur * 90 / 1000)) < 90000 &&
+                priv->sync_mode == AV_SYNC_MODE_AMASTER) {
+         *cur = priv->segment.start;
+         return TRUE;
       }
       *cur = gst_util_uint64_scale_int(*cur, GST_SECOND, GST_MSECOND);
     }
