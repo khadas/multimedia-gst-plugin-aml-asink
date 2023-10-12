@@ -30,7 +30,8 @@ libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c \
 libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS)
 libgstamlhalasink_la_LIBADD = $(GST_LIBS)
 libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
-libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync -lgstamltimepair
+libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync
+libgstamlhalasink_la_LIBADD += -L$(builddir)/.libs/ -lgstamltimepair
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
 
 if AD
