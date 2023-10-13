@@ -1,18 +1,6 @@
 # Note: plugindir is set in configure
 
 ##############################################################################
-# time pair parameter lib
-##############################################################################
-lib_LTLIBRARIES = libgstamltimepair.la
-libgstamltimepair_la_SOURCES = gstparam_time_pair.c
-
-libgstamltimepair_la_CFLAGS = $(GST_CFLAGS)
-libgstamltimepair_la_LIBADD = $(GST_LIBS)
-libgstamltimepair_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
-
-include_HEADERS = gstparam_time_pair.h
-
-##############################################################################
 # plugin
 ##############################################################################
 plugin_LTLIBRARIES = libgstamlhalasink.la
@@ -24,14 +12,14 @@ libgstamlhalasink_la_SOURCES = gstamlhalasink_new.c \
 			       scaletempo.h \
 			       scaletempo.c \
 			       gstamlclock.c \
-			       mediasync_wrap.c
+			       mediasync_wrap.c \
+			       gstparam_time_pair.c
 
 # compiler and linker flags used to compile this plugin, set in configure.ac
 libgstamlhalasink_la_CFLAGS = $(GST_CFLAGS)
 libgstamlhalasink_la_LIBADD = $(GST_LIBS)
 libgstamlhalasink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstamlhalasink_la_LIBADD += -L$(TARGET_DIR)/usr/lib -laudio_client -lamlavsync
-libgstamlhalasink_la_LIBADD += -L$(builddir)/.libs/ -lgstamltimepair
 libgstamlhalasink_la_LIBTOOLFLAGS = --tag=disable-static
 
 if AD
