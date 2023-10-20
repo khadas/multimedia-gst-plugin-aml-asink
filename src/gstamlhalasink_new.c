@@ -1991,7 +1991,6 @@ static int create_av_sync(GstAmlHalAsink *sink)
   if (priv->direct_mode_ && gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC) {
     char id_setting[20] = {0};
     char type_setting[20] = {0};
-    g_mutex_lock(&priv->feed_lock);
     snprintf(type_setting, sizeof(type_setting), "hw_av_sync_type=%d", GST_AML_CLOCK_TYPE_MEDIASYNC);
     snprintf(id_setting, sizeof(id_setting), "hw_av_sync=%d", priv->session_id);
     if (priv->stream_) {
@@ -2001,7 +2000,6 @@ static int create_av_sync(GstAmlHalAsink *sink)
       GST_ERROR_OBJECT (sink, "no stream opened");
       ret = -1;
     }
-    g_mutex_unlock(&priv->feed_lock);
   } else if (!priv->avsync && priv->direct_mode_) {
     char id_setting[20] = {0};
     char type_setting[20] = {0};
