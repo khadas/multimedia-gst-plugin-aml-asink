@@ -86,6 +86,8 @@ GST_DEBUG_CATEGORY (gst_aml_hal_asink_debug_category);
 #define GST_AUDIO_FORMAT_TYPE_LPCM_PRIV2 103
 #define GST_AUDIO_FORMAT_TYPE_LPCM_TS 104
 #define GST_AUDIO_FORMAT_TYPE_TRUE_HD 105
+#define MAX_COMMIT_BYTES 30*1024
+#define MAX_COMMIT_COUNT 70
 
 #define PTS_90K 90000
 #define HAL_INVALID_PTS (GST_CLOCK_TIME_NONE - 1)
@@ -103,6 +105,12 @@ struct _GstAmlHalAsinkPrivate
   gboolean tts_mode_;
   /* current cap */
   GstAudioRingBufferSpec spec;
+
+  /* tureHD*/
+  guchar *commit_data;
+  gsize commit_size;
+  guint64 commit_time;
+  gint commit_count;
 
   /* condition lock for chain and other threads */
   GCond   run_ready;
@@ -696,6 +704,10 @@ gst_aml_hal_asink_init (GstAmlHalAsink* sink)
   priv->session_id = -1;
   priv->stream_volume = 1.0;
   priv->ms12_enable = false;
+  priv->commit_data = NULL;
+  priv->commit_time =GST_CLOCK_TIME_NONE;
+  priv->commit_count = 0;
+  priv->commit_size = 0;
 #ifdef ENABLE_MS12
   priv->ac4_pat = 255;
   priv->ac4_ass_type = 255;
@@ -754,6 +766,8 @@ gst_aml_hal_asink_dispose (GObject * object)
   g_free (priv->ac4_lang2);
 #endif
   g_free (priv->log_path);
+  if (priv->commit_data)
+    g_free (priv->commit_data);
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }
 
@@ -1765,6 +1779,9 @@ static inline void gst_aml_hal_asink_reset_sync (GstAmlHalAsink * sink, gboolean
   priv->received_eos = FALSE;
   priv->eos = FALSE;
   priv->last_ts = GST_CLOCK_TIME_NONE;
+  priv->commit_time = GST_CLOCK_TIME_NONE;
+  priv->commit_count = 0;
+  priv->commit_size = 0;
   priv->flushing_ = FALSE;
   priv->first_pts_set = FALSE;
   priv->wrapping_time = 0;
@@ -2702,6 +2719,67 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   size = info.size;
   time = GST_BUFFER_TIMESTAMP (buf);
 
+  /*audio tureHD codec*/
+  if (priv->format_ == AUDIO_FORMAT_DOLBY_TRUEHD)
+  {
+     if (priv->commit_data == NULL)
+     {
+         priv->commit_data = g_malloc0 (MAX_COMMIT_BYTES);
+         if (priv->commit_data == NULL)
+         {
+            GST_ERROR("Memory allocation failure");
+            gst_buffer_unmap (buf, &info);
+            return GST_FLOW_OK;
+         }
+         priv->commit_count = 0;
+     }
+     if (priv->commit_count == 0)
+     {
+        /*use first data as timestamp for the entire package*/
+        priv->commit_time = GST_BUFFER_TIMESTAMP (buf);
+     }
+     /*if memory is not out of bounds, the loop continues to store data*/
+     if (priv->commit_size + size <= MAX_COMMIT_BYTES)
+     {
+        if (priv->commit_count < MAX_COMMIT_COUNT)
+        {
+            memcpy (priv->commit_data + priv->commit_size, data, size);
+            priv->commit_size += size;
+            if (priv->commit_count == MAX_COMMIT_COUNT-1)
+            {
+               /*save 70 data and send it to hal_commit*/
+               data = priv->commit_data;
+               size = priv->commit_size;
+               time = priv->commit_time;
+            }
+            else
+            {
+               /*keep looping to store data*/
+               priv->commit_count++;
+               gst_buffer_unmap (buf, &info);
+               return GST_FLOW_OK;
+            }
+        }
+     }
+     else
+     {
+          /*Send save data before memory overreach to hal_cmmit*/
+          GST_WARNING("mem is already insufficient,need to expand memory size:%d",size);
+          priv->commit_data = g_realloc(priv->commit_data, priv->commit_size + size);
+          if (priv->commit_data == NULL)
+          {
+             GST_ERROR("Expand memory allocation failure");
+             gst_buffer_unmap (buf, &info);
+             return GST_FLOW_OK;
+          }
+          memcpy (priv->commit_data + priv->commit_size, data, size);
+          priv->commit_size += size;
+          data = priv->commit_data;
+          size = priv->commit_size;
+          time = priv->commit_time;
+     }
+  }
+
   g_mutex_lock(&priv->feed_lock);
   /* blocked on paused */
   while (priv->paused_ && !priv->flushing_)
@@ -2824,6 +2902,14 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
     hal_commit (sink, data, size, time);
   }
   priv->rendered_frames++;
+  if (priv->commit_size > MAX_COMMIT_BYTES)
+  {
+     g_free(priv->commit_data);
+     priv->commit_data = NULL;
+  }
+  priv->commit_count = 0;
+  priv->commit_size = 0;
+  priv->commit_time = GST_CLOCK_TIME_NONE;
 
 commit_done:
   g_mutex_unlock(&priv->feed_lock);
