@@ -36,6 +36,7 @@
 #include <pthread.h>
 #include <math.h>
 #include <gst/audio/audio.h>
+#include <sys/prctl.h>
 #include <stdlib.h>
 #include <time.h>
 #include <audio_if_client.h>
@@ -192,6 +193,8 @@ struct _GstAmlHalAsinkPrivate
   EssRMgr *rm;
   int resAssignedId;
 #endif
+  /* thread priority */
+  gboolean pri_set;
 
   /* debugging */
   gboolean diag_log_enable;
@@ -2559,6 +2562,20 @@ gst_aml_hal_asink_render (GstAmlHalAsink * sink, GstBuffer * buf)
   if (G_UNLIKELY (priv->received_eos)) {
     priv->dropped_frames++;
     goto was_eos;
+  }
+
+  if (!priv->pri_set) {
+    int rc;
+    struct sched_param schedParam;
+
+    prctl (PR_SET_NAME, "asink_chain");
+    schedParam.sched_priority= 30;
+    rc = pthread_setschedparam( pthread_self(), SCHED_FIFO, &schedParam );
+    if ( rc )
+      GST_ERROR("failed to set chain thread policy and priority: %d errno %d", rc, errno);
+    else
+      GST_WARNING("set chain thread to policy %s priority %d", "SCHED_FIFO", 50);
+    priv->pri_set = true;
   }
 
 #ifdef SUPPORT_AD
