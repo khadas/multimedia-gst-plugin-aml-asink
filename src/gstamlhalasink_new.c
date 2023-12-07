@@ -3188,6 +3188,10 @@ gst_aml_hal_asink_change_state (GstElement * element,
           priv->hw_dev_->set_parameters(priv->hw_dev_, "gst_pause=1");
         GST_OBJECT_UNLOCK (sink);
         usleep(60*1000);
+      } else if (priv->stream_) {
+        GST_OBJECT_LOCK (sink);
+        priv->stream_->common.set_parameters(&priv->stream_->common, "will_pause=1");
+        GST_OBJECT_UNLOCK (sink);
       }
       if (priv->avsync && priv->sync_mode == AV_SYNC_MODE_PCR_MASTER) {
         GST_INFO_OBJECT(sink, "avsync to free run");
