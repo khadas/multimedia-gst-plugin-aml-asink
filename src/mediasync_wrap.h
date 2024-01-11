@@ -72,6 +72,7 @@ int mediasync_wrap_getRealTimeForNextVsync(void* handle, int64_t *outRealUs);
 int mediasync_wrap_getTrackMediaTime(void* handle, int64_t *outMeidaUs);
 
 int mediasync_wrap_GetMediaTimeByType(void* handle, media_time_type mediaTimeType, mediasync_time_unit tunit,int64_t* mediaTime);
+int MediaSync_wrap_audioSwitch(void* handle, bool start, int64_t pts);
 
 int mediasync_wrap_reset(void* handle);
 void mediasync_wrap_destroy(void* handle);

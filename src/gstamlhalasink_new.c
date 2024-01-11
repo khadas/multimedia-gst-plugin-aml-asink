@@ -1296,7 +1296,10 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
     {
       gboolean enable = g_value_get_boolean(value);
       GST_WARNING_OBJECT (sink, "seamless switch audio:%d", priv->seamless_switch);
-      if (priv->avsync) {
+      GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
+      if (gst_aml_clock_get_clock_type(priv->provided_clock) == GST_AML_CLOCK_TYPE_MEDIASYNC) {
+        MediaSync_wrap_audioSwitch(aclock->handle, enable, -1);
+      } else if (priv->avsync) {
            GST_INFO_OBJECT (sink, "AV sync set seamless switch:%d",
                    priv->seamless_switch);
            av_sync_set_audio_switch(priv->avsync, enable);

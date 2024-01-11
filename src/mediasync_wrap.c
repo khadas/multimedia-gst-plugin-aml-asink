@@ -48,7 +48,7 @@ typedef mediasync_result (*MediaSync_getRealTimeForNextVsync_func)(void* handle,
 typedef mediasync_result (*MediaSync_getTrackMediaTime_func)(void* handle, int64_t *outMediaUs);
 
 typedef mediasync_result (*MediaSync_GetMediaTimeByType)(void* handle, media_time_type mediaTimeType, mediasync_time_unit tunit,int64_t* mediaTime);
-
+typedef mediasync_result (*MediaSync_audioSwitch)(void* handle, bool start, int64_t pts);
 typedef mediasync_result (*MediaSync_reset_func)(void* handle);
 typedef void (*MediaSync_destroy_func)(void* handle);
 
@@ -62,6 +62,7 @@ static MediaSync_getRealTimeFor_func gMediaSync_getRealTimeFor = NULL;
 static MediaSync_getRealTimeForNextVsync_func gMediaSync_getRealTimeForNextVsync = NULL;
 static MediaSync_getTrackMediaTime_func gMediaSync_getTrackMediaTime = NULL;
 static MediaSync_GetMediaTimeByType gMediaSync_GetMediaTimeByType = NULL;
+static MediaSync_audioSwitch gMediaSync_audioSwitch = NULL;
 static MediaSync_reset_func gMediaSync_reset = NULL;
 static MediaSync_destroy_func gMediaSync_destroy = NULL;
 
@@ -158,6 +159,13 @@ static bool mediasync_wrap_create_init()
     (MediaSync_GetMediaTimeByType)dlsym(glibHandle, "MediaSync_GetMediaTimeByType");
     if (gMediaSync_GetMediaTimeByType == NULL) {
         GST_ERROR("dlsym MediaSync_AudioProcess failed, err=%s\n", dlerror());
+        return err;
+    }
+
+    gMediaSync_audioSwitch =
+    (MediaSync_audioSwitch)dlsym(glibHandle, "MediaSync_audioSwitch");
+    if (gMediaSync_audioSwitch == NULL) {
+        GST_ERROR("dlsym MediaSync_audioSwitch failed, err=%s\n", dlerror());
         return err;
     }
 
@@ -281,6 +289,14 @@ int mediasync_wrap_reset(void* handle) {
 void mediasync_wrap_destroy(void* handle) {
      if (handle != NULL && gMediasync_init)  {
          gMediaSync_destroy(handle);
+     } else {
+        GST_ERROR("[%s] no handle\n", __func__);
+     }
+}
+
+int MediaSync_wrap_audioSwitch(void* handle, bool start, int64_t pts) {
+    if (handle != NULL && gMediaSync_audioSwitch)  {
+         gMediaSync_audioSwitch(handle, start, pts);
      } else {
         GST_ERROR("[%s] no handle\n", __func__);
      }
