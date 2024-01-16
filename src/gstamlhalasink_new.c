@@ -2209,6 +2209,7 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
           priv->need_update_rate = TRUE;
         GST_INFO_OBJECT (sink, "rate to %f", segment.rate);
 
+        priv->group_done = FALSE;
 #if 0
         /* some loop playback will set this flag after EOS */
         if ((segment.flags & GST_SEGMENT_FLAG_RESET) && priv->spec.caps) {
@@ -2238,7 +2239,6 @@ gst_aml_hal_asink_event (GstAmlHalAsink *sink, GstEvent * event)
       GST_DEBUG_OBJECT (sink, "group change from %d to %d",
           priv->group_id, group_id);
       priv->group_id = group_id;
-      priv->group_done = FALSE;
       priv->eos_end_time = GST_CLOCK_TIME_NONE;
       priv->gap_state = GAP_IDLE;
       priv->gap_start_pts = -1;
