@@ -318,9 +318,6 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       COMMON_AUDIO_CAPS "; "
       "audio/x-ac4; "
       "audio/x-true-hd; "
-#ifdef ENABLE_MS12
-      "audio/mpeg, mpegversion=4, stream-format=(string){loas}; "
-#endif
 #ifdef ENABLE_DTS
       "audio/x-dts; "
       "audio/x-gst-fourcc-dtse;"
