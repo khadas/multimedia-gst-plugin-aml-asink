@@ -95,6 +95,10 @@ GstClock*       gst_aml_clock_new             (const gchar *name, GstAmlClockGet
 GstClockTime    gst_aml_clock_get_time        (GstClock * clock);
 int             gst_aml_clock_get_session_id  (GstClock * clock);
 enum gst_aml_clock_type gst_aml_clock_get_clock_type (GstClock * clock);
+/* set mode should ONLY be triggered by audio sink, don't change it in other element */
+void            gst_aml_clock_set_session_mode  (GstClock * clock, int mode);
+/* get mode is typically called by video sink */
+int             gst_aml_clock_get_session_mode  (GstClock * clock);
 
 #ifdef G_DEFINE_AUTOPTR_CLEANUP_FUNC
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstAmlClock, gst_object_unref)

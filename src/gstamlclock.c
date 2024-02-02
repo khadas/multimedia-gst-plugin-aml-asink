@@ -40,6 +40,7 @@ struct _GstAmlClockPrivate
   enum gst_aml_clock_type type;
   int session;
   int session_id;
+  int session_mode;
 };
 
 #define parent_class gst_aml_clock_parent_class
@@ -191,6 +192,22 @@ int gst_aml_clock_get_session_id(GstClock * clock)
   GstAmlClockPrivate *priv = aclock->priv;
 
   return priv->session_id;
+}
+
+void gst_aml_clock_set_session_mode(GstClock * clock, int mode)
+{
+  GstAmlClock *aclock =  GST_AML_CLOCK_CAST (clock);
+  GstAmlClockPrivate *priv = aclock->priv;
+
+  priv->session_mode = mode;
+}
+
+int gst_aml_clock_get_session_mode(GstClock * clock)
+{
+  GstAmlClock *aclock =  GST_AML_CLOCK_CAST (clock);
+  GstAmlClockPrivate *priv = aclock->priv;
+
+  return priv->session_mode;
 }
 
 static GstClockTime

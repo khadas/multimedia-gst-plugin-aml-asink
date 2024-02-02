@@ -3120,8 +3120,10 @@ gst_aml_hal_asink_change_state (GstElement * element,
       if (priv->direct_mode_)
         essos_rm_init (sink);
 #endif
-      if (priv->provided_clock)
+      if (priv->provided_clock) {
         priv->session_id = gst_aml_clock_get_session_id(priv->provided_clock);
+        gst_aml_clock_set_session_mode (priv->provided_clock, priv->sync_mode);
+      }
       GST_WARNING_OBJECT(sink, "avsync session %d", priv->session_id);
 
       GST_OBJECT_LOCK (sink);
