@@ -1344,7 +1344,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       GST_WARNING_OBJECT (sink, "ac4_pat:%d", priv->ac4_pat);
       GST_OBJECT_LOCK (sink);
       if (priv->hw_dev_) {
-        snprintf(setting, sizeof(setting), "ms12_runtime=-pat_force %d", priv->ac4_pat);
+        snprintf(setting, sizeof(setting), "ms12_runtime=-pat %d", priv->ac4_pat);
         priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
       }
       GST_OBJECT_UNLOCK (sink);
@@ -1366,7 +1366,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       }
       GST_OBJECT_LOCK (sink);
       if (priv->hw_dev_) {
-        snprintf(setting, sizeof(setting), "ms12_runtime=-lang_force %s", priv->ac4_lang);
+        snprintf(setting, sizeof(setting), "ms12_runtime=-lang %s", priv->ac4_lang);
         priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
       }
       GST_OBJECT_UNLOCK (sink);
@@ -1388,7 +1388,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       }
       GST_OBJECT_LOCK (sink);
       if (priv->hw_dev_) {
-        snprintf(setting, sizeof(setting), "ms12_runtime=-lang2_force %s", priv->ac4_lang2);
+        snprintf(setting, sizeof(setting), "ms12_runtime=-lang2 %s", priv->ac4_lang2);
         priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
       }
       GST_OBJECT_UNLOCK (sink);
@@ -1411,7 +1411,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       }
       GST_OBJECT_LOCK (sink);
       if (priv->hw_dev_) {
-        snprintf(setting, sizeof(setting), "ms12_runtime=-at_force %d", priv->ac4_ass_type);
+        snprintf(setting, sizeof(setting), "ms12_runtime=-at %d", priv->ac4_ass_type);
         priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
       }
       GST_OBJECT_UNLOCK (sink);
@@ -1423,7 +1423,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->ac4_mixer_gain = g_value_get_int(value);
       GST_OBJECT_LOCK (sink);
       if (priv->hw_dev_) {
-        snprintf(setting, sizeof(setting), "ms12_runtime=-xu_force %d", priv->ac4_mixer_gain);
+        snprintf(setting, sizeof(setting), "ms12_runtime=-xu %d", priv->ac4_mixer_gain);
         priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
       }
       GST_OBJECT_UNLOCK (sink);
@@ -1435,7 +1435,7 @@ gst_aml_hal_asink_set_property (GObject * object, guint property_id,
       priv->ms12_mix_en = g_value_get_int(value);
       GST_OBJECT_LOCK (sink);
       if (priv->hw_dev_) {
-        snprintf(setting, sizeof(setting), "associate_audio_mixing_enable_force=%d", priv->ms12_mix_en);
+        snprintf(setting, sizeof(setting), "ms12_runtime=-xa %d", priv->ms12_mix_en);
         priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
       }
       GST_OBJECT_UNLOCK (sink);
@@ -4208,19 +4208,19 @@ static void hal_set_player_overwrite(GstAmlHalAsink * sink, gboolean defaults)
   if (!priv->hw_dev_)
     return;
   /*ac4 setting */
-  snprintf(setting, sizeof(setting), "ms12_runtime=-lang_force %s", defaults ? "DEF" : priv->ac4_lang);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-lang %s", defaults ? "DEF" : priv->ac4_lang);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-  snprintf(setting, sizeof(setting), "ms12_runtime=-lang2_force %s", defaults ? "DEF" : priv->ac4_lang2);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-lang2 %s", defaults ? "DEF" : priv->ac4_lang2);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-  snprintf(setting, sizeof(setting), "ms12_runtime=-pat_force %d", defaults ? 255 : priv->ac4_pat);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-pat %d", defaults ? 255 : priv->ac4_pat);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
   snprintf(setting, sizeof(setting), "ms12_runtime=-ac4_pres_group_idx %d", defaults ? -1 : priv->ac4_pres_group_idx);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-  snprintf(setting, sizeof(setting), "ms12_runtime=-at_force %d", defaults ? 255 : priv->ac4_ass_type);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-at %d", defaults ? 255 : priv->ac4_ass_type);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-  snprintf(setting, sizeof(setting), "ms12_runtime=-xu_force %d", defaults ? 255 : priv->ac4_mixer_gain);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-xu %d", defaults ? 255 : priv->ac4_mixer_gain);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
-  snprintf(setting, sizeof(setting), "associate_audio_mixing_enable_force=%d", defaults ? 255 : priv->ms12_mix_en);
+  snprintf(setting, sizeof(setting), "ms12_runtime=-xa %d", defaults ? 255 : priv->ms12_mix_en);
   priv->hw_dev_->set_parameters(priv->hw_dev_, setting);
 }
 #endif
