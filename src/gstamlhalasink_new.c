@@ -3202,6 +3202,12 @@ gst_aml_hal_asink_change_state (GstElement * element,
         GST_INFO_OBJECT(sink, "avsync to free run");
         av_sync_change_mode (priv->avsync, AV_SYNC_MODE_FREE_RUN);
       }
+#ifdef SUPPORT_AD
+      else if (priv->is_ad_audio) {
+        GST_INFO_OBJECT(sink, "id %d to free run", priv->session_id);
+        av_sync_change_mode_by_id(priv->session_id, AV_SYNC_MODE_FREE_RUN);
+      }
+#endif
       GST_OBJECT_LOCK (sink);
       hal_pause (sink);
       /* To complete transition to paused state in async_enabled mode,
