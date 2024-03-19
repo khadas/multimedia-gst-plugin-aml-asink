@@ -325,6 +325,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
       "audio/x-dts; "
       "audio/x-gst-fourcc-dtse;"
       "audio/x-dtsl;"
+      "audio/x-gst-fourcc-dtsx;"
 #endif
       "audio/x-private1-lpcm; "
       "audio/x-private2-lpcm; "
@@ -1623,7 +1624,8 @@ parse_caps (GstAudioRingBufferSpec * spec, GstCaps * caps)
     info.bpf = 1;
   } else if (g_str_equal (mimetype, "audio/x-dts")
     || g_str_equal (mimetype, "audio/x-gst-fourcc-dtse")
-    || g_str_equal (mimetype, "audio/x-dtsl")) {
+    || g_str_equal (mimetype, "audio/x-dtsl")
+    || g_str_equal (mimetype, "audio/x-gst-fourcc-dtsx")) {
     /* if cannot extract the needed information from the cap, set default value */
     if (!(gst_structure_get_int (structure, "rate", &info.rate)) || info.rate <= 0)
         info.rate = 48000;
