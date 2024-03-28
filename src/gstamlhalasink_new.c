@@ -833,11 +833,14 @@ get_position (GstAmlHalAsink* sink, GstFormat format, pos_t pos_type, gint64 * c
   }
 
   if (!priv->render_samples) {
-    if (priv->segment.start != GST_CLOCK_TIME_NONE)
+    if (priv->segment.start != GST_CLOCK_TIME_NONE) {
       *cur = priv->segment.start;
-    else
+      return TRUE;
+    }
+    else {
       *cur = GST_CLOCK_TIME_NONE;
-    return TRUE;
+      return false;
+    }
   }
 
   if (!priv->provided_clock) {
@@ -850,6 +853,7 @@ get_position (GstAmlHalAsink* sink, GstFormat format, pos_t pos_type, gint64 * c
     GstAmlClock *aclock = GST_AML_CLOCK_CAST(priv->provided_clock);
     if (aclock->handle) {
       mediasync_wrap_GetMediaTimeByType(aclock->handle, MEDIA_STC_TIME, MEDIASYNC_UNIT_US, cur);
+      GST_LOG_OBJECT (sink, "POSITION: %lld pcr: %u segment: %lld", *cur, pcr, priv->segment.start);
       if (*cur < 0) {
         *cur = priv->segment.start;
         return TRUE;
@@ -863,6 +867,11 @@ get_position (GstAmlHalAsink* sink, GstFormat format, pos_t pos_type, gint64 * c
     }
     if (pmono)
       *pmono = 0;
+    if (*cur < priv->segment.start) {
+      //if the position smaller than segment start, return false.
+      GST_WARNING_OBJECT (sink, "start %lld cur %lld", priv->segment.start, *cur);
+      return false;
+    }
   } else {
     rc = avsync_get_time(sink, pos_type, &pcr, &mono);
     if (rc)
